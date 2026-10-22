@@ -1,0 +1,20 @@
+{
+  "_source": {
+    "id": "12aa8218-da7c-45af-90c2-f8c094cb603f",
+    "time": 1792680249414,
+    "correlationid": "CORR_ID-AK12b3f5a5-bc78-4304-b6b5-7fa2a3d908df",
+    "event_type": "token",
+    "data": {
+      "grant_type": "client_credentials",
+      "result": "success",
+      "action": "issued",
+      "scope": "agent.run",
+      "applicationname": "UC2 Course MCP Conversational Agent",
+      "applicationid": "<runtime-application-id>",
+      "client_id": "<runtime-client-id>",
+      "entity_id": "<agent-id>",
+      "entity_type": "agent",
+      "txn": "f871fa67-90b6-4aae-bdd2-4387c4c3b3f6"
+    }
+  }
+}

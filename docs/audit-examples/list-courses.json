@@ -1,0 +1,28 @@
+{
+  "_source": {
+    "id": "dd2dc3e0-5dc8-48ad-ac3a-49aab4b0b574",
+    "time": 1792680249803,
+    "correlationid": "CORR_ID-AKd4d3c38c-aa89-40cb-b5fb-b0450c515a82",
+    "event_type": "token",
+    "data": {
+      "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+      "result": "success",
+      "action": "issued",
+      "scope": "mcp.tools.invoke course.read",
+      "applicationname": "UC2 Course MCP Agent Token Exchange",
+      "applicationid": "<token-exchange-application-id>",
+      "client_id": "<token-exchange-client-id>",
+      "entity_id": "<agent-id>",
+      "entity_type": "agent",
+      "actor_entity_id": "<agent-id>",
+      "actor_entity_type": "agent",
+      "actor": "{\"sub\":\"<agent-id>\"}",
+      "username": "demo-user",
+      "requested_auth_details": "[{\"type\": \"urn:ibm:demo:verify:agent_action\", \"courseId\": \"ALL\", \"operationDetails\": {\"creator\": \"<runtime-client-id>\", \"affectedPerson\": \"demo-user\", \"loggedInSubject\": \"demo-user\", \"action\": \"list_available_courses\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"list_available_courses\", \"downstreamSystem\": \"course-api\"}}]",
+      "auth_details": "[{\"courseId\":\"ALL\",\"operationDetails\":{\"action\":\"list_available_courses\",\"affectedPerson\":\"demo-user\",\"creator\":\"<runtime-client-id>\",\"downstreamSystem\":\"course-api\",\"loggedInSubject\":\"demo-user\",\"resource\":\"mcp-tool\",\"targetSystem\":\"course-mcp-server\",\"toolName\":\"list_available_courses\"},\"type\":\"urn:ibm:demo:verify:agent_action\"}]",
+      "txn": "23e0f2be-ba9d-47f4-9974-50f8b5ec6e2a",
+      "subject_txn": "23e0f2be-ba9d-47f4-9974-50f8b5ec6e2a",
+      "actor_txn": "f871fa67-90b6-4aae-bdd2-4387c4c3b3f6"
+    }
+  }
+}

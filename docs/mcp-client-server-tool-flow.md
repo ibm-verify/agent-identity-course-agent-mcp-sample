@@ -1,3 +1,9 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # MCP client, server and protected tools
 
 ## Runtime flow
@@ -22,7 +28,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    H["Human subject access token"] --> S["IBM Verify STS"]
+    H["Human subject access token"] --> S["IBM Verify Token Exchange"]
     A["Agent actor access token"] --> S
     R["Selected tool authorization details"] --> S
     S --> T["Delegated JWT: audience course-mcp-server"]

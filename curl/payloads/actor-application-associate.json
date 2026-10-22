@@ -1,0 +1,17 @@
+[
+  {
+    "op": "replace",
+    "path": "tags",
+    "value": [
+      "purpose=agent_id"
+    ]
+  },
+  {
+    "op": "add",
+    "path": "/providers/oidc/properties",
+    "value": {
+      "entityType": "agent",
+      "entityId": "${AGENT_ID}"
+    }
+  }
+]

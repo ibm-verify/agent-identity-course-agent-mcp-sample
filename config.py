@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 
 def _csv_or_space(value: str) -> list[str]:
@@ -34,6 +34,9 @@ class Settings:
     subject_client_secret: str = os.getenv("SUBJECT_CLIENT_SECRET", "")
     subject_redirect_uri: str = os.getenv("SUBJECT_REDIRECT_URI", "http://localhost:8000/callback")
     subject_scopes: str = os.getenv("SUBJECT_SCOPES", "openid profile email")
+
+    # Stable registry identity used to validate delegated act.sub.
+    agent_id: str = os.getenv("AGENT_ID", "").strip()
 
     actor_client_id: str = os.getenv("ACTOR_CLIENT_ID", "")
     actor_client_secret: str = os.getenv("ACTOR_CLIENT_SECRET", "")

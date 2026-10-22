@@ -1,161 +1,116 @@
-# UC2 setup and API walkthrough
+<!--
+Copyright IBM Corp. All Rights Reserved.
 
-This guide complements README Steps 1–11. Run requests selectively in the order below; do not run the entire setup collection because it includes suspension and optional ADT creation.
+SPDX-License-Identifier: Apache-2.0
+-->
 
-## 1. Variables and identities
+# Execute setup and diagnostics in Postman or Insomnia
 
-Import `api-clients/postman/uc2-ibm-verify-setup.postman_collection.json` or `api-clients/insomnia/uc2-ibm-verify-setup.insomnia.json`.
+[README](../README.md) · [Setup and explanations](setup.md) · [Collection coverage](collection-coverage.md)
 
-Postman uses collection variables; remove environment overrides for these same names. Postman scripts save successful token, client and agent creation responses. Insomnia uses its Base Environment; copy responses manually.
+Begin with [Setup](setup.md) for the complete first-time configuration. Use this guide when choosing Postman or Insomnia for the API steps.
 
-| Collection variable | Source | Application `.env` equivalent |
+## Choose one client and import the current files
+
+| Client | Setup import | Runtime import |
 |---|---|---|
-| `tenant_url` | Tenant origin, e.g. `https://yourtenant.ice.ibmcloud.com`; no `/oauth2` suffix | Endpoint URLs / `VERIFY_ISSUER` |
-| `admin_client_id`, `admin_client_secret` | Administrative API client from README Step 1 | `VERIFY_MANAGEMENT_CLIENT_ID`, `VERIFY_MANAGEMENT_CLIENT_SECRET` if directory lookup is used |
-| `admin_access_token` | Request 01 `access_token` | Setup only |
-| `actor_client_id`, `actor_client_secret` | Request 02 `client_id`, `client_secret` | `ACTOR_CLIENT_ID`, `ACTOR_CLIENT_SECRET` |
-| `agent_id` | Request 03 `id` | Setup only; governed identity, not actor client ID |
-| `actor_access_token` | Request 08 `access_token` | Runtime test only |
-| `resource_client_id`, `resource_client_secret` | Client permitted to introspect the tested token | Diagnostics only |
+| Postman | `api-clients/postman/uc2-ibm-verify-setup.postman_collection.json` | `api-clients/postman/uc2-runtime-diagnostics.postman_collection.json` |
+| Insomnia | `api-clients/insomnia/uc2-ibm-verify-setup.insomnia.json` | `api-clients/insomnia/uc2-runtime-diagnostics.insomnia.json` |
 
-UI: create an administrative API client with `writeAgents`, `manageAgentStatus`, `manageOidcDynamicClient`, and `manageAuthDetailTypes`. Add `readUsers` when named-user lookup is used. Record the credentials before sending request 01.
+Import the setup collection and the runtime collection for your chosen client. Do not run the entire collection: suspension and delete-scope denial are intentional negative tests, and ADT creation is optional when the type already exists.
 
-## 2. Create, associate, and activate
+Postman stores successful response values in **collection variables**. Remove conflicting environment variables with the same names. Insomnia uses the imported **Base Environment**: copy returned values there manually. Setup and runtime environments are independent; copy the required values into the runtime environment explicitly. Neither client populates the application's local `.env`. The local `STS_*` keys hold the Token Exchange application settings; keep these key names when copying values.
 
-| Order | Postman / Insomnia request | Method and endpoint | Expected result / next action | UI alternative |
-|---|---|---|---|---|
-| 1 | 01 Get Admin Access Token | POST `/oauth2/token` | Save `access_token` | API request required to obtain the setup token |
-| 2 | 02 DCR Create UC2 Actor Client | POST `/oauth2/register` | Save `client_id`, `client_secret` | Applications → OpenID Connect; enable Client Credentials, `agent.run` |
-| 3 | 03 Onboard Agent | POST `/v1.0/Agents` | Save Agent `id`; inspect returned status | Identities → AI agents → Create |
-| 4 | 04 Get Agent Details | GET `/v1.0/Agents/{agent_id}` | Verify identity and initial status | Open the agent |
-| 5 | 05 DCR Associate Actor Client with Agent | PUT `/oauth2/register/{actor_client_id}` | `extension.entity_id=agent_id`, `entity_type=agent` | Edit agent → Identity & authentication → select actor OAuth application → Save |
-| 6 | 06 Activate Agent | PUT `/v1.0/Agents/{agent_id}` | Confirm `ACTIVE` using request 04 | Open agent status/options and activate/review as supported by tenant |
-| 7 | 08 Get Actor Token | POST `/oauth2/token` | `agent.run` access token | Runtime request; UI is not a token generator |
-| 8 | 10 Introspect Actor Token | POST `/oauth2/introspect` | `active=true`; inspect `sub` and entity fields | Reports provide separate authentication evidence |
+## Variable map
 
-Request 05 uses the UC1 DCR association pattern rather than an `oauthClients.issuer` placeholder. For DCR PUT, inspect the existing actor configuration and preserve required metadata if you added settings beyond this sample. Lifecycle PUT payloads are for the sample agent; preserve existing metadata/associations when applying them to a customized agent. Verify association again after activation/suspension.
-
-The SCIM Agent requests need both `Accept: application/scim+json` and `Content-Type: application/scim+json` for bodies. A client ID is not a Registry ID.
-
-For cURL, export `TENANT`, `ADMIN_ACCESS_TOKEN`, `ACTOR_CLIENT_ID`, `ACTOR_CLIENT_SECRET`, and `AGENT_ID` as returned by these operations. README Step 3 contains creation, association and activation commands. Association requires `envsubst` or manual replacement of `${AGENT_ID}` in `curl/payloads/actor-client-dcr-update.json`; never send an unresolved placeholder.
-
-## 3. Configure the human application and actor relationship
-
-UI: **Applications → Add application → OpenID Connect**, name `UC2_subject_token`, complete company name, select Authorization Code, require PKCE S256, redirect `http://localhost:8000/callback`, scopes `openid profile email`. The subject access token can remain **Default**. Configure entitlements for the test user. Record `SUBJECT_CLIENT_ID` and `SUBJECT_CLIENT_SECRET`.
-
-In the subject application **Endpoint configuration → Introspect**, add a custom-rule mapping with target attribute `may_act`:
-
-```json
-{"sub":"<ACTOR_CLIENT_ID>"}
-```
-
-Use the actor OAuth client ID. Leave the STS **Skip default actor validation** option disabled. Inspect an actual actor token/introspection response to confirm the actor `sub` used by your tenant. If the tenant intentionally uses Actor Criteria, configure an explicit allow condition through that feature instead; do not simply skip delegation validation.
-
-The ID token establishes human identity. The human **access token** remains `subject_token` for Token Exchange. The ID token is not a replacement for that subject access token in this package.
-
-## 4. Register ADT and configure STS
-
-Use request **09 Register MCP ADT** for a new ADT; the request body is the same as `payloads/agent_action_adt_registration.json`. If the type name already exists from the direct-tool sample, inspect and update its schema in **Applications → Authorization detail types** rather than creating a duplicate. Keep fields needed by both samples.
-
-Follow README Step 6 to create `UC2 Course MCP Agent Token Exchange`: Token Exchange grant, actor required, delegated output **JWT**, audience `course-mcp-server`, the three permitted scopes, the ADT attached, entitlements configured, and the UC2 consent mapping rule saved. The mapping selects minimum scopes and returns approved `authorization_details`; the application does not send a broad `scope` in Token Exchange.
-
-| Tool | Delegated scopes | `courseId` |
+| Variable in either client | Source and purpose | Local `.env` equivalent |
 |---|---|---|
-| `list_available_courses` | `mcp.tools.invoke course.read` | `ALL` |
-| `list_enrolled_courses` | `mcp.tools.invoke course.read` | `ALL` |
-| `enroll_course` | `mcp.tools.invoke course.enroll` | Exact course, e.g. `SEC-301` |
-| `delete_course_history` (negative test) | `mcp.tools.invoke` only | `ALL`; published handler requires `course.delete` and is denied |
+| `tenant_url` | HTTPS tenant origin; no trailing slash | Tenant endpoint URLs |
+| `admin_client_id`, `admin_client_secret` | Administrative API client with setup entitlements | Setup only |
+| `admin_access_token` | Setup request 01 `access_token` | Setup only |
+| `agent_id` | Setup request 02 registry `id` | `AGENT_ID` |
+| `actor_client_id`, `actor_client_secret` | Setup request 03 OAuth credentials | `ACTOR_CLIENT_ID`, `ACTOR_CLIENT_SECRET` |
+| `actor_application_id` | Runtime application's management ID from console | Setup only |
+| `actor_access_token` | Setup request 08 `access_token` | Transient runtime input |
+| `resource_client_id`, `resource_client_secret` | Client authorized to introspect the selected token | Diagnostics only |
+| `subject_access_token` | Human access token obtained with Authorization Code + PKCE | Transient runtime input |
+| `subject_resource_client_id`, `subject_resource_client_secret` | Client permitted to introspect the human token | Diagnostics only |
+| `sts_client_id`, `sts_client_secret` | Token Exchange application credentials | `STS_CLIENT_ID`, `STS_CLIENT_SECRET` |
+| `delegated_access_token` | Runtime request 05 or 07 `access_token` | Transient tool-call authority |
+| `logged_in_subject` | Actual human username/email/sub used by the sample | Request context |
+| `tool_name`, `course_id` | Intended operation; use `ALL` for listing | Request context |
 
-<span style="color:red">TBD: tenant-tested management APIs for subject/STS application creation, consent-mapping updates, actor mapping and application entitlements. This package uses UI for those configuration operations; do not infer API endpoints.</span>
+Find `agent_id` in the agent details and `actor_application_id` in the application details or management URL. The setup guide shows where to obtain each value.
 
-## 5. Start and obtain a subject token
+## Setup sequence and expected outputs
 
-Copy `.env.example` to `.env`, fill the three application credentials and tenant endpoints, keep `USE_LLM=false`, `MCP_FORWARD_TO_COURSE_API=false`, and `ALLOW_LOCAL_UNSIGNED_JWT=false`. Use the tenant's OIDC discovery values for issuer/JWKS. Run the installation/start commands in README Step 8, then sign in through `http://localhost:8000/login`.
+Complete [setup Step 1](setup.md#step-1--prepare-administrative-access), including `manageAppAccessAdmin`, before running request 01.
 
-For manual Postman/Insomnia Token Exchange tests, obtain a **separate** human access token with OAuth 2.0 **Authorization Code + PKCE**:
+| Order | Request | Purpose | Check / save |
+|---|---|---|---|
+| 1 | 01 Get Admin Access Token | Authorize setup calls | HTTP 200; save `access_token` as `admin_access_token` |
+| 2 | 02 Onboard Agent | Create the governed record | HTTP 201; save `id` as `agent_id` |
+| 3 | 03 DCR Create UC2 Actor Client | Create runtime credentials | HTTP 201; save `client_id` and `client_secret` |
+| 4 | 04 Get Agent Details | Read only this agent | HTTP 200; returned `id=agent_id` |
+| 5 | 05 Associate Actor Application with Agent | Link credentials to agent identity | Set `actor_application_id` first; HTTP 204, no body |
+| 6 | 06 Activate Agent, then 04 again | Establish lifecycle readiness | ACTIVE and association verified in console |
+| 7 | 08 Get Actor Token | Obtain fresh runtime identity | HTTP 200; save `access_token` as `actor_access_token` |
+| 8 | 10 Introspect Actor Token | Prove registry identity is in token | `active=true`, `sub=agent_id`, `client_id=actor_client_id` |
 
-1. In the API client's OAuth helper, set authorization URL `<tenant>/oauth2/authorize`, token URL `<tenant>/oauth2/token`, subject client ID/secret, scopes `openid profile email`, PKCE S256 and a unique state.
-2. Register the helper's exact callback URL in the subject application before authorizing. Use the callback URL displayed by your installed client; the browser application's callback stays `http://localhost:8000/callback`.
-3. Authorize in the browser and sign in as the intended test user. Use **client credentials in request body** to match this sample.
-4. Copy the resulting **access token** to runtime collection `subject_access_token`. Do not copy `id_token` into that field. Populate `logged_in_subject` with the actual validated `preferred_username`, `email`, or `sub` used in the application.
+For request 10, supply introspection-authorized `resource_client_id`/secret. Your Token Exchange client can be used if your tenant permits it; a client credential pair is not automatically entitled to introspect every token. A 401/403 here is an introspection-access problem, not proof of an actor-sub mismatch.
 
-<span style="color:red">TBD: confirm the exact OAuth helper callback URL and supported authentication settings in your installed Postman/Insomnia version.</span>
+Request 05 replaces application tags with the supplied array. Preserve any additional tags for an existing customized application. If it returns 403, add **Manage application lifecycle** to the administrative API client, obtain a fresh admin token and retry. An empty 204 response is expected and must not be parsed as JSON.
 
-The API helpers use their own state/PKCE handling. The web application additionally validates ID-token signature, issuer, audience, nonce, and required identity/time claims.
+**Stop before runtime if request 10 does not show the registry AgentID in `sub`.** Review application association, purpose tag, ACTIVE status and token freshness.
 
-## 6. Run Token Exchange and MCP calls
+## Shared console configuration
 
-Import `uc2-runtime-diagnostics` from the Postman or Insomnia directory. Variables in this collection/environment are independent of setup: copy `tenant_url`, `actor_client_id`, a fresh `actor_access_token`, the human `subject_access_token`, `sts_client_id`, and `sts_client_secret`.
+Follow setup Steps 4–6 in both client workflows:
 
-1. Run **01 Application Health**, then **02 MCP tools/list through client**. Discovery should return the four registered tools; it does not grant access.
-2. Set `tool_name` and `course_id` from the table above, and `logged_in_subject` from the token's human identity.
-3. Run **05 Token Exchange for Selected MCP Tool**. Postman stores the delegated token automatically; in Insomnia copy `access_token` to `delegated_access_token`.
-4. Optionally run **04 Introspect Delegated Token as MCP Resource** with a client authorized to introspect it. Confirm active status, audience, actor, minimum scope and approved authorization details. STS credentials are not automatically valid introspection credentials.
-5. Run **03 MCP tools/call through client**. Repeat Token Exchange for each different operation/course; do not reuse a read token for enrollment.
-6. Run **06 Introspect Subject Token and may_act** using `subject_resource_client_id`/secret authorized to introspect the subject application's token. Confirm the allowed actor mapping.
+1. Create/configure the human OIDC application: Authorization Code + PKCE, browser callback and test-user entitlements.
+2. Under the human application's **Endpoint configuration → Introspect**, configure target attribute `may_act` with a custom rule whose resulting JSON is:
 
-These `/mcp/*` HTTP routes are diagnostics wrappers around the application's MCP client. The actual sample MCP transport is local STDIO (`mcp_server.py` child process); these routes are not a standards-based remote MCP HTTP endpoint.
+   ```json
+   {"sub": "<registry-agent-id>"}
+   ```
 
-Equivalent Token Exchange cURL, using `RAR_JSON` containing one MCP authorization detail from `payloads/*_mcp_rar.json` after replacing all identity placeholders:
+   Replace the placeholder with the AgentID returned by request 02 or shown in the agent details.
+3. Register the ADT with request 09 only when absent. If UC1 already uses the same type, inspect/merge the MCP schema through the console instead of duplicating or breaking it.
+4. Configure the Token Exchange application, JWT output, audience `course-mcp-server`, permitted scopes, ADT, consent mapping and test-user entitlements.
+5. Keep **Skip default actor validation unchecked** for the supplied `may_act` path. If your tenant instead uses Actor Criteria, configure an explicit rule for the intended delegation and select the skip option only when deliberately replacing default validation. Do not enable unconditional delegation to bypass an error.
 
-```bash
-curl --request POST "$TENANT/oauth2/token" \
-  --header "Content-Type: application/x-www-form-urlencoded" \
-  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
-  --data-urlencode "client_id=$STS_CLIENT_ID" \
-  --data-urlencode "client_secret=$STS_CLIENT_SECRET" \
-  --data-urlencode "subject_token=$SUBJECT_ACCESS_TOKEN" \
-  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:access_token" \
-  --data-urlencode "actor_token=$ACTOR_ACCESS_TOKEN" \
-  --data-urlencode "actor_token_type=urn:ietf:params:oauth:token-type:access_token" \
-  --data-urlencode "audience=course-mcp-server" \
-  --data-urlencode "authorization_details=$RAR_JSON"
-```
+Also select **All users are entitled to this application** in the Token Exchange application's **Entitlements** tab. Then edit the agent's **Agent tasks**, select **Act on behalf of a user**, associate **UC2 Course MCP Agent Token Exchange**, and save. These console steps apply to both API clients.
 
-The parameter is an array, even though the readable individual payload files contain one object. For example, build `RAR_JSON` with `jq -c '[.]'` after editing a copy of the relevant payload. `creator` is the actor client ID in this package.
+## Obtain the actual human access token for manual testing
 
-## 7. Delete scope-denial test
+The browser sample obtains the subject token through sign-in. For separate API-client tests, use your client's **OAuth 2.0 Authorization Code + PKCE** helper:
 
-**Before testing:** update the existing Verify ADT from `payloads/agent_action_adt_schema.json`; both `operationDetails.action` and `operationDetails.toolName` enums now include `delete_course_history`. An older schema can reject the request at STS before the scope demonstration.
+1. Set authorize URL `<tenant>/oauth2/authorize`, token URL `<tenant>/oauth2/token`, human application's client ID/secret, scopes `openid profile email`, PKCE S256 and a fresh state.
+2. Read the helper's callback URL in your installed client and add that exact URL to the human application before authorizing. Keep `http://localhost:8000/callback` registered for browser use.
+3. Authenticate the intended human and obtain an **access token**. Do not substitute the ID token.
+4. Copy that access token to runtime `subject_access_token`. Populate `logged_in_subject` using the same actual human identity used by the app.
 
-The server publishes `delete_course_history`. Its required scopes are `mcp.tools.invoke course.delete`, while Verify grants only `mcp.tools.invoke`.
+After changing delegation configuration, obtain fresh tokens and sign in again. A separate API-client token does not prove which older token is held by an already running browser session.
 
-1. Run **07 Token Exchange for Delete - No Delete Scope**.
-2. In Insomnia copy its `access_token` into `delegated_access_token`; Postman saves it automatically.
-3. Run **08 Invoke Delete - Expect Scope Denial**.
-4. Expect **403**, `denied_stage=scope`, and missing `course.delete`. No data is deleted. A stale server may still return “tool not exposed”; restart using the new package and confirm four discovery results.
+## Runtime sequence
 
-```mermaid
-flowchart TD
-    U["Delete my course history"] --> H["Host builds delete_course_history context"]
-    H --> V["Verify Token Exchange"]
-    V --> T["Delegated scope: mcp.tools.invoke"]
-    T --> C["MCP client discovers published delete tool"]
-    C --> M["tools/call: delete_course_history"]
-    M --> G["Gateway requires mcp.tools.invoke + course.delete"]
-    G --> Q{"course.delete present?"}
-    Q -->|"No: supplied mapping"| D["403: missing course.delete; no deletion"]
-    Q -->|"Yes: separate explicit grant"| E["Validate identity and context before local deletion"]
-```
+Set runtime `agent_id`, `actor_client_id`, fresh `actor_access_token`, human `subject_access_token`, `sts_client_id`, `sts_client_secret`, `tenant_url` and `logged_in_subject`.
 
-The supplied STS allowed scopes and mapping intentionally omit `course.delete`. If a separate trusted policy later grants it, the local handler deletes only that subject’s SQLite enrollment writes, after all identity/context checks. Static example fixtures are unchanged. This handler is a local-store operation even when optional downstream forwarding is enabled.
+1. Run **01 Application Health** and **02 MCP tools/list through client**. Expect four tools; discovery grants no execution rights.
+2. Run **06 Introspect Subject Token and may_act** with the subject introspection credentials. Expect `active=true` and `may_act.sub=agent_id` for this guide's delegation path.
+3. Set `tool_name=list_available_courses` and `course_id=ALL`. Run **05 Token Exchange for Selected MCP Tool**. Expect HTTP 200. Postman saves the returned token; in Insomnia copy `access_token` to `delegated_access_token`.
+4. Run **04 Introspect Delegated Token as MCP Resource** using authorized resource credentials. Expect `active=true`, `act.sub=agent_id`, the MCP audience, `mcp.tools.invoke course.read` and matching authorization details.
+5. Run **03 MCP tools/call through client**. Expect the approved operation to succeed.
+6. Repeat with `tool_name=enroll_course` and an actual `course_id`, such as `SEC-301`, obtaining a new delegated token for the changed operation. Then use `list_enrolled_courses` with `ALL` and a fresh read token.
 
-## 8. Negative tests, lifecycle, and audit
+The supplied mapping derives delegated scopes from the requested operation. The request payload uses `actor_client_id` for `creator`.
 
-Try enrollment with a read token, a different `course_id` than approved, a different tool name, an altered/expired token, or a different subject. The protected boundary should deny execution. A local tampered-token test proves resource validation, not STS policy.
+## Optional negative tests and recovery
 
-After an ACTIVE success, run setup **07 Suspend Agent** and **04 Get Agent Details**; try a new chat operation or **08 Get Actor Token**. Record the actual Verify denial stage/error. Reactivate with **06**, verify association/status and repeat. Offline JWT validation does not revoke already issued tokens; verify fresh actor requests for this lifecycle demonstration.
+- **Missing delete authority:** run runtime 07, then 08 using its new token. Expected resource denial is HTTP 403, `denied_stage=scope`, missing `course.delete`. The supplied mapping does not grant that scope. If Token Exchange denies issuance instead, record that earlier stage and do not claim a resource-scope test passed.
+- **Cross-user request:** use the browser test in the runtime guide. Named-user lookup requires `readUsers`; lookup success does not grant cross-user access.
+- **Suspension:** run setup 07 only after a working ACTIVE test, then setup 04 and a fresh runtime token request. Record the stage Verify denies. Reactivate with setup 06, verify with 04 and obtain fresh tokens. Previously issued JWTs may still pass offline validation until expiry.
 
-README Step 11 explains the human, actor, STS and MCP evidence and correlation limits. <span style="color:red">TBD: sanitized event examples and actual report/correlation field names from your UC2 tenant; exact suspension error and whether it occurs at actor issuance or STS.</span>
+## API request reference
 
-## Package boundaries
-
-The delegated output remains JWT because the gateway verifies it with JWKS before checking MCP audience, actor, minimum scopes, operation/tool/course and identity context. Supporting opaque **delegated output** tokens requires an authenticated introspection path at the MCP boundary; this package supports opaque **human subject** tokens already.
-
-The unsigned-token switch exists only for explicit local demonstrations; keep it false for Verify testing. Enrollment writes use local SQLite so they survive the client’s fresh MCP subprocess for each call. Set `ENROLLMENT_DB_PATH` to choose a location; default is `enrollments.sqlite3` beside the server. The included username-keyed fixture enrollments remain demo data. No centralized audit service has been added.
-
-This remains a localhost tutorial: tokens/claims may appear in its diagnostic UI and the browser session uses signed cookies, not encrypted server-side storage. A remote deployment needs server-side sessions, protected diagnostics, and durable structured audit storage.
-
-## Tests are optional
-
-No application module imports `tests/`. This package excludes the folder; it starts and runs without it. Keep the runtime files, `requirements.txt`, and your `.env`.
+Open a request's description for its purpose and expected result. The [API request reference](collection-coverage.md) lists every operation. Postman checks responses in the Tests tab; in Insomnia compare the response to the expected fields in the table.

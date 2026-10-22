@@ -1,3 +1,7 @@
+# Copyright IBM Corp. All Rights Reserved.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Local enrollment persistence across the tutorial's short-lived MCP processes."""
 from pathlib import Path
 import json

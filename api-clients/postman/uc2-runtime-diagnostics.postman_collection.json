@@ -1,7 +1,8 @@
 {
   "info": {
     "name": "UC2 MCP Runtime Diagnostics",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Copyright IBM Corp. All Rights Reserved.\n\nSPDX-License-Identifier: Apache-2.0\n\nFollow docs/setup-and-api-walkthrough.md. Find the AgentID in the agent details. Configure the Token Exchange application entitlements and associate it under Agent tasks \u2192 Act on behalf of a user. Run suspension and delete requests only for the optional negative tests.\n\nStart with docs/setup.md. Use this collection as an alternative to cURL for API steps. Local STS_* environment keys contain the Token Exchange application settings; retain those key names."
   },
   "variable": [
     {
@@ -63,6 +64,10 @@
     {
       "key": "actor_client_id",
       "value": ""
+    },
+    {
+      "key": "agent_id",
+      "value": ""
     }
   ],
   "item": [
@@ -71,16 +76,40 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{local_app_url}}/health"
-      }
+        "url": "{{local_app_url}}/health",
+        "description": "Purpose: Confirm this checkout is running.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200. If unavailable check localhost:8000 and the uvicorn terminal."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "02 - MCP tools/list through client",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{local_app_url}}/mcp/tools"
-      }
+        "url": "{{local_app_url}}/mcp/tools",
+        "description": "Purpose: Discover registered MCP tools through the client/server protocol.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; four tools including the intentional delete negative-test tool. Discovery grants no authority."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "03 - MCP tools/call through client",
@@ -101,8 +130,20 @@
             }
           }
         },
-        "url": "{{local_app_url}}/mcp/invoke"
-      }
+        "url": "{{local_app_url}}/mcp/invoke",
+        "description": "Purpose: Invoke the selected tool with delegated authority.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200 for an allowed matching request; verify business result. Use the token from 05 for the same tool/course/subject."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "04 - Introspect Delegated Token as MCP Resource",
@@ -139,8 +180,33 @@
             }
           ]
         },
-        "url": "{{tenant_url}}/oauth2/introspect"
-      }
+        "url": "{{tenant_url}}/oauth2/introspect",
+        "description": "Purpose: Inspect delegated identity and approved operation before execution.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true; act.sub=agent_id; audience contains course-mcp-server; check scope and authorization_details."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const v = pm.response.json();",
+              "  pm.test(\"Token active\", () => pm.expect(v.active).to.eql(true));",
+              "  pm.test(\"Agent subject matches registry AgentID\", () => pm.expect(v.act && v.act.sub).to.eql(pm.variables.get(\"agent_id\")));",
+              "}"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "05 - Token Exchange for Selected MCP Tool",
@@ -202,9 +268,19 @@
               "type": "text"
             }
           ]
-        }
+        },
+        "description": "Purpose: Exchange a human access token and fresh actor token for the selected tool.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to delegated_access_token. Match tool_name, course_id and logged_in_subject. RAR creator remains actor_client_id.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -251,8 +327,33 @@
             }
           ]
         },
-        "url": "{{tenant_url}}/oauth2/introspect"
-      }
+        "url": "{{tenant_url}}/oauth2/introspect",
+        "description": "Purpose: Check the actual subject delegation mapping.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true; may_act.sub=agent_id for the supplied may_act route. The human own sub stays the human identity. If using Actor Criteria instead, inspect that explicit rule and Skip default actor validation."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const v = pm.response.json();",
+              "  pm.test(\"Token active\", () => pm.expect(v.active).to.eql(true));",
+              "  pm.test(\"Agent subject matches registry AgentID\", () => pm.expect(v.may_act && v.may_act.sub).to.eql(pm.variables.get(\"agent_id\")));",
+              "}"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "07 - Token Exchange for Delete - No Delete Scope",
@@ -314,9 +415,19 @@
               "type": "text"
             }
           ]
-        }
+        },
+        "description": "Purpose: Optional negative test: obtain a delete-intent token without the delete scope.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200 only if policy permits issuance; expected scope excludes course.delete. Copy returned access_token, then run 08. A policy denial at Token Exchange is a different observed stage.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -347,9 +458,19 @@
             }
           }
         },
-        "url": "{{local_app_url}}/mcp/invoke"
+        "url": "{{local_app_url}}/mcp/invoke",
+        "description": "Purpose: Prove the resource boundary rejects missing business authority.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 403 with denied_stage=scope and reason mentioning course.delete. No data should be deleted with the supplied mapping."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 403\", () => pm.response.to.have.status(403));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {

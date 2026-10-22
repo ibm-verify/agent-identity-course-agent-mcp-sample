@@ -9,7 +9,8 @@
       "parentId": null,
       "name": "UC2 MCP Runtime Diagnostics",
       "scope": "collection",
-      "_type": "workspace"
+      "_type": "workspace",
+      "description": "Copyright IBM Corp. All Rights Reserved.\n\nSPDX-License-Identifier: Apache-2.0\n\n\n\nStart with docs/setup.md. Use this collection as an alternative to cURL for API steps. Local STS_* environment keys contain the Token Exchange application settings; retain those key names."
     },
     {
       "_id": "env_uc2_runtime_diagnostics",
@@ -30,7 +31,8 @@
         "subject_resource_client_secret": "",
         "course_id": "SEC-301",
         "tool_name": "enroll_course",
-        "actor_client_id": ""
+        "actor_client_id": "",
+        "agent_id": ""
       },
       "isPrivate": true,
       "_type": "environment"
@@ -46,7 +48,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 1,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Confirm this checkout is running.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200. If unavailable check localhost:8000 and the uvicorn terminal.",
       "_type": "request"
     },
     {
@@ -60,7 +62,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 2,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Discover registered MCP tools through the client/server protocol.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; four tools including the intentional delete negative-test tool. Discovery grants no authority.",
       "_type": "request"
     },
     {
@@ -82,7 +84,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 3,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Invoke the selected tool with delegated authority.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200 for an allowed matching request; verify business result. Use the token from 05 for the same tool/course/subject.",
       "_type": "request"
     },
     {
@@ -114,7 +116,7 @@
         "password": "{{ _.resource_client_secret }}"
       },
       "metaSortKey": 4,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Inspect delegated identity and approved operation before execution.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true; act.sub=agent_id; audience contains course-mcp-server; check scope and authorization_details.",
       "_type": "request"
     },
     {
@@ -182,7 +184,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 5,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Exchange a human access token and fresh actor token for the selected tool.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to delegated_access_token. Match tool_name, course_id and logged_in_subject. RAR creator remains actor_client_id.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples.",
       "_type": "request"
     },
     {
@@ -214,7 +216,7 @@
         "password": "{{ _.subject_resource_client_secret }}"
       },
       "metaSortKey": 6,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Check the actual subject delegation mapping.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true; may_act.sub=agent_id for the supplied may_act route. The human own sub stays the human identity. If using Actor Criteria instead, inspect that explicit rule and Skip default actor validation.",
       "_type": "request"
     },
     {
@@ -282,7 +284,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 7,
-      "description": "Copy response values to Base Environment as described in docs/setup-and-api-walkthrough.md.",
+      "description": "Purpose: Optional negative test: obtain a delete-intent token without the delete scope.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200 only if policy permits issuance; expected scope excludes course.delete. Copy returned access_token, then run 08. A policy denial at Token Exchange is a different observed stage.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples.",
       "_type": "request"
     },
     {
@@ -304,7 +306,7 @@
       "parameters": [],
       "authentication": {},
       "metaSortKey": 8,
-      "description": "Expect HTTP 403, denied_stage=scope and missing course.delete. Copy request 07 access_token to delegated_access_token first.",
+      "description": "Purpose: Prove the resource boundary rejects missing business authority.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 403 with denied_stage=scope and reason mentioning course.delete. No data should be deleted with the supplied mapping.",
       "_type": "request"
     }
   ]

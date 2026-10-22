@@ -1,7 +1,8 @@
 {
   "info": {
     "name": "UC2 IBM Verify Setup - MCP Agent",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Copyright IBM Corp. All Rights Reserved.\n\nSPDX-License-Identifier: Apache-2.0\n\nFollow docs/setup-and-api-walkthrough.md. Find the AgentID in the agent details. Configure the Token Exchange application entitlements and associate it under Agent tasks \u2192 Act on behalf of a user. Run suspension and delete requests only for the optional negative tests.\n\nStart with docs/setup.md. Use this collection as an alternative to cURL for API steps. Local STS_* environment keys contain the Token Exchange application settings; retain those key names."
   },
   "variable": [
     {
@@ -47,6 +48,10 @@
     {
       "key": "actor_access_token",
       "value": ""
+    },
+    {
+      "key": "actor_application_id",
+      "value": ""
     }
   ],
   "item": [
@@ -89,9 +94,19 @@
               "type": "text"
             }
           ]
-        }
+        },
+        "description": "Purpose: Authenticate setup operations with the administrative API client.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to admin_access_token. If 401, check this client ID/secret. After entitlement changes obtain a fresh token."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -104,7 +119,58 @@
       ]
     },
     {
-      "name": "02 - DCR - Create UC2 Actor Client",
+      "name": "02 - Onboard Agent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{admin_access_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/scim+json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/scim+json"
+          }
+        ],
+        "url": "{{tenant_url}}/v1.0/Agents",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Purpose: Create the governed identity before associating runtime credentials.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201; copy id to agent_id. Expected name: UC2 Course MCP Conversational Agent. Reuse an existing record instead of creating duplicates."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 201\", () => pm.response.to.have.status(201));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code >= 200 && pm.response.code < 300) { const v = pm.response.json().id; if (v) pm.collectionVariables.set(\"agent_id\", v); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - DCR - Create UC2 Actor Client",
       "request": {
         "method": "POST",
         "header": [
@@ -135,56 +201,25 @@
               "language": "json"
             }
           }
-        }
+        },
+        "description": "Purpose: Create the OAuth application supplying runtime credentials.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201; copy client_id and client_secret to actor_client_id and actor_client_secret. This client_id is not the AgentID."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 201\", () => pm.response.to.have.status(201));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
               "if (pm.response.code >= 200 && pm.response.code < 300) { const v = pm.response.json(); if (v.client_id) pm.collectionVariables.set(\"actor_client_id\", v.client_id); if (v.client_secret) pm.collectionVariables.set(\"actor_client_secret\", v.client_secret); }"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "03 - Onboard Agent",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Authorization",
-            "value": "Bearer {{admin_access_token}}"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/scim+json"
-          },
-          {
-            "key": "Accept",
-            "value": "application/scim+json"
-          }
-        ],
-        "url": "{{tenant_url}}/v1.0/Agents",
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ]\n}\n",
-          "options": {
-            "raw": {
-              "language": "json"
-            }
-          }
-        }
-      },
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "if (pm.response.code >= 200 && pm.response.code < 300) { const v = pm.response.json().id; if (v) pm.collectionVariables.set(\"agent_id\", v); }"
             ]
           }
         }
@@ -214,13 +249,25 @@
             "Agents",
             "{{agent_id}}"
           ]
+        },
+        "description": "Purpose: Read the specific created agent and inspect lifecycle and credential association.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; id must equal agent_id. Repeat after activation/suspension. Verify application association in the console."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
         }
-      }
+      ]
     },
     {
-      "name": "05 - DCR - Associate Actor Client with Agent",
+      "name": "05 - Associate Actor Application with Agent",
       "request": {
-        "method": "PUT",
+        "method": "PATCH",
         "header": [
           {
             "key": "Authorization",
@@ -228,24 +275,51 @@
           },
           {
             "key": "Content-Type",
-            "value": "application/json"
-          },
-          {
-            "key": "Accept",
-            "value": "application/json"
+            "value": "application/json-patch+json"
           }
         ],
-        "url": "{{tenant_url}}/oauth2/register/{{actor_client_id}}",
+        "url": {
+          "raw": "{{tenant_url}}/v1.0/applications/{{actor_application_id}}",
+          "host": [
+            "{{tenant_url}}"
+          ],
+          "path": [
+            "v1.0",
+            "applications",
+            "{{actor_application_id}}"
+          ]
+        },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"client_name\": \"UC2 Course MCP Conversational Agent\",\n  \"grant_types\": [\n    \"client_credentials\"\n  ],\n  \"extension\": {\n    \"entity_id\": \"{{agent_id}}\",\n    \"entity_type\": \"agent\"\n  },\n  \"scope\": \"agent.run\",\n  \"token_endpoint_auth_method\": \"client_secret_post\"\n}\n",
+          "raw": "[\n  {\n    \"op\": \"replace\",\n    \"path\": \"tags\",\n    \"value\": [\n      \"purpose=agent_id\"\n    ]\n  },\n  {\n    \"op\": \"add\",\n    \"path\": \"/providers/oidc/properties\",\n    \"value\": {\n      \"entityType\": \"agent\",\n      \"entityId\": \"{{agent_id}}\"\n    }\n  }\n]",
           "options": {
             "raw": {
               "language": "json"
             }
           }
+        },
+        "description": "Purpose: Bind the runtime application to the registry AgentID and mark its purpose.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 204 with no body. actor_application_id is the application management ID. Requires manageAppAccessAdmin. Replaces tags: preserve other tags on customized applications. Verify association in Identity & authentication.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 204\", () => pm.response.to.have.status(204));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Application association accepted\", () => pm.response.to.have.status(204));"
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "name": "06 - Activate Agent",
@@ -268,14 +342,26 @@
         "url": "{{tenant_url}}/v1.0/Agents/{{agent_id}}",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"ACTIVE\"\n}\n",
+          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"ACTIVE\"\n}",
           "options": {
             "raw": {
               "language": "json"
             }
           }
+        },
+        "description": "Purpose: Make the sample agent active for fresh runtime authentication.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; rerun 04 and confirm ACTIVE and association. Obtain a fresh actor token. Preserve customized metadata when adapting lifecycle PUT."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "name": "07 - Suspend Agent",
@@ -298,14 +384,26 @@
         "url": "{{tenant_url}}/v1.0/Agents/{{agent_id}}",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"SUSPENDED\"\n}\n",
+          "raw": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"SUSPENDED\"\n}",
           "options": {
             "raw": {
               "language": "json"
             }
           }
+        },
+        "description": "Purpose: Optional negative test: suspend the agent and test a fresh runtime request.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; rerun 04. Record the actual denial stage in a new token request. Reactivate with 06. Previously issued JWTs may remain usable until expiry."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "name": "08 - Get Actor Token",
@@ -351,9 +449,19 @@
               "type": "text"
             }
           ]
-        }
+        },
+        "description": "Purpose: Authenticate the runtime OAuth application to obtain an actor token representing the registered agent.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to actor_access_token; run 10. actor sub must be the registry agent_id, not actor_client_id."
       },
       "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -383,7 +491,7 @@
             "value": "application/json"
           }
         ],
-        "url": "{{tenant_url}}/oidc-mgmt/v1.0/auth-detail-types",
+        "url": "{{tenant_url}}/v1.0/auth-detail-types",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"type\": \"urn:ibm:demo:verify:agent_action\",\n  \"schema\": \"{\\\"description\\\": \\\"Agent action authorization details for the IBM Verify conversational AI MCP tools sample\\\", \\\"type\\\": \\\"object\\\", \\\"required\\\": [\\\"type\\\", \\\"courseId\\\", \\\"operationDetails\\\"], \\\"additionalProperties\\\": false, \\\"properties\\\": {\\\"type\\\": {\\\"type\\\": \\\"string\\\", \\\"const\\\": \\\"urn:ibm:demo:verify:agent_action\\\"}, \\\"courseId\\\": {\\\"type\\\": \\\"string\\\"}, \\\"operationDetails\\\": {\\\"type\\\": \\\"object\\\", \\\"required\\\": [\\\"creator\\\", \\\"affectedPerson\\\", \\\"loggedInSubject\\\", \\\"action\\\", \\\"targetSystem\\\", \\\"resource\\\", \\\"toolName\\\", \\\"downstreamSystem\\\"], \\\"additionalProperties\\\": false, \\\"properties\\\": {\\\"creator\\\": {\\\"type\\\": \\\"string\\\"}, \\\"affectedPerson\\\": {\\\"type\\\": \\\"string\\\"}, \\\"loggedInSubject\\\": {\\\"type\\\": \\\"string\\\"}, \\\"action\\\": {\\\"type\\\": \\\"string\\\", \\\"enum\\\": [\\\"list_available_courses\\\", \\\"list_enrolled_courses\\\", \\\"enroll_course\\\", \\\"delete_course_history\\\"]}, \\\"targetSystem\\\": {\\\"type\\\": \\\"string\\\"}, \\\"resource\\\": {\\\"type\\\": \\\"string\\\"}, \\\"toolName\\\": {\\\"type\\\": \\\"string\\\", \\\"enum\\\": [\\\"list_available_courses\\\", \\\"list_enrolled_courses\\\", \\\"enroll_course\\\", \\\"delete_course_history\\\"]}, \\\"downstreamSystem\\\": {\\\"type\\\": \\\"string\\\"}}}}}\",\n  \"inlineMode\": true,\n  \"description\": \"Agent action authorization details for the Course Agent sample\",\n  \"useCustomMapping\": false,\n  \"signatureStrategy\": \"full_hash\",\n  \"consentInlineText\": \"JE9JRENfQVVUSERFVEFJTF9MQUJFTF9TVERUSVRMRSQ8YnIvPiRPSURDX0FVVEhERVRBSUxfTEFCRUxfU1RESUQkIHthZC5pZGVudGlmaWVyfQ\",\n  \"consentLabel\": \"\"\n}",
@@ -392,8 +500,20 @@
               "language": "json"
             }
           }
+        },
+        "description": "Purpose: Optional setup: register the authorization-details schema accepted by Verify.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201. If type exists, inspect/update via console; do not duplicate it or remove UC1 fields. See payloads/agent_action_adt_schema.json."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 201\", () => pm.response.to.have.status(201));"
+            ]
+          }
         }
-      }
+      ]
     },
     {
       "name": "10 - Introspect Actor Token",
@@ -439,7 +559,49 @@
               "type": "string"
             }
           ]
+        },
+        "description": "Purpose: Verify actual actor identity before configuring delegation or calling tools.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true, sub=agent_id, client_id=actor_client_id. Use a client authorized to introspect this token (resource_client_id/secret; your Token Exchange client may be permitted). Configure subject may_act.sub=agent_id, keep human sub unchanged."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Expected HTTP 200\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const v = pm.response.json();",
+              "  pm.test(\"Actor token active\", () => pm.expect(v.active).to.eql(true));",
+              "  pm.test(\"Actor sub is registry AgentID\", () => pm.expect(v.sub).to.eql(pm.variables.get(\"agent_id\")));",
+              "  pm.test(\"OAuth client identity retained\", () => pm.expect(v.client_id).to.eql(pm.variables.get(\"actor_client_id\")));",
+              "}"
+            ]
+          }
         }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const tenant = pm.variables.get(\"tenant_url\");",
+          "if (!tenant || !/^https:\\/\\/[^/]+$/.test(tenant) || tenant.includes(\"<\")) throw new Error(\"Set tenant_url to an HTTPS tenant origin without a trailing slash\");",
+          "const raw = pm.request.url.toString();",
+          "for (const name of [\"agent_id\", \"actor_client_id\", \"actor_application_id\"]) {",
+          "  if (raw.includes(\"{{\" + name + \"}}\") && !pm.variables.get(name)) throw new Error(\"Set \" + name + \" before this request\");",
+          "}"
+        ]
       }
     }
   ]

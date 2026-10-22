@@ -11,6 +11,7 @@ import sys
 from enrollment_store import list_enrollments, enroll, delete_enrollments
 
 from config import settings
+from actor_validation import validate_actor
 from token_utils import verify_delegated_token, extract_authorization_details
 from course_api import (
     AVAILABLE_COURSES,
@@ -196,29 +197,9 @@ def _validate_mcp_invocation(
             ),
         }
 
-    act = claims.get("act")
-
-    if not act:
-        return {
-            "valid": False,
-            "stage": "actor",
-            "reason": "Missing actor claim 'act' in delegated token",
-        }
-
-    actor_sub = None
-
-    if isinstance(act, dict):
-        actor_sub = act.get("sub") or act.get("client_id")
-
-    if not actor_sub or (settings.actor_client_id and actor_sub != settings.actor_client_id):
-        return {
-            "valid": False,
-            "stage": "actor",
-            "reason": (
-                f"Invalid actor. Expected '{settings.actor_client_id}', "
-                f"token act.sub={actor_sub}"
-            ),
-        }
+    actor_result = validate_actor(claims)
+    if not actor_result["valid"]:
+        return {**actor_result, "stage": "actor"}
 
     required_scopes = ACTION_SCOPE_MAP.get(tool_name)
 

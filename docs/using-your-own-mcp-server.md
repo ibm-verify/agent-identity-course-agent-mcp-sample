@@ -1,3 +1,9 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Using your own MCP server
 
 1. Keep the conversational application as the MCP Host or integrate the client logic into your existing host.

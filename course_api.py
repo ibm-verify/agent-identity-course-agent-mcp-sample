@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from actor_validation import validate_actor
+
 from typing import Dict, Any, List
 
 from config import settings
@@ -73,21 +75,7 @@ def _validate_audience(claims: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _validate_actor(claims: Dict[str, Any]) -> Dict[str, Any]:
-    act = claims.get("act")
-
-    if not act:
-        return {"valid": False, "reason": "Missing actor claim 'act' in delegated token"}
-
-    expected_actor = settings.actor_client_id
-    actor_sub = None
-
-    if isinstance(act, dict):
-        actor_sub = act.get("sub") or act.get("client_id")
-
-    if expected_actor and actor_sub and actor_sub != expected_actor:
-        return {"valid": False, "reason": f"Invalid actor. Expected '{expected_actor}', token act.sub={actor_sub}"}
-
-    return {"valid": True}
+    return validate_actor(claims)
 
 
 def _validate_authorization_details(
