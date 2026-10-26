@@ -6,6 +6,10 @@ SPDX-License-Identifier: Apache-2.0
 
 # Secure a Course Agent with MCP tool integration
 
+| ⚠️ General availability ⚠️ |
+| :--- |
+| This demonstration uses generally available IBM Verify Agent Identity capabilities. Availability may vary by data center and tenant rollout. Confirm that the required capabilities are enabled in your tenant before starting |
+
 This tutorial demonstrates how IBM Agent Identity in IBM Verify secures a conversational agent that calls MCP course tools on behalf of a signed-in user.
 
 ## Before you begin
