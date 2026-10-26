@@ -1,24 +1,20 @@
 {
   "_type": "export",
   "__export_format": 4,
-  "__export_date": "2026-07-14T00:00:00.000Z",
-  "__export_source": "IBM Verify UC2 cookbook",
+  "__export_date": "2026-10-01T04:00:00.000Z",
+  "__export_source": "UC2 cookbook",
   "resources": [
     {
-      "_id": "wrk_uc2_ucibmverifys",
+      "_id": "wrk_uc2_ibm_verify_setup",
       "parentId": null,
-      "modified": 0,
-      "created": 0,
-      "name": "UC2 IBM Verify Setup",
-      "description": "",
+      "name": "UC2 IBM Verify Setup - MCP Agent",
       "scope": "collection",
-      "_type": "workspace"
+      "_type": "workspace",
+      "description": "Copyright IBM Corp. All Rights Reserved.\n\nSPDX-License-Identifier: Apache-2.0\n\n\n\nStart with docs/setup.md. Use this collection as an alternative to cURL for API steps. Local STS_* environment keys contain the Token Exchange application settings; retain those key names."
     },
     {
-      "_id": "env_wrk_uc2_ucibmverifys",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "env_uc2_ibm_verify_setup",
+      "parentId": "wrk_uc2_ibm_verify_setup",
       "name": "Base Environment",
       "data": {
         "tenant_url": "https://<tenant>",
@@ -27,64 +23,64 @@
         "admin_access_token": "",
         "actor_client_id": "",
         "actor_client_secret": "",
-        "actor_client_reference": "",
         "agent_id": "",
         "actor_scope": "agent.run",
         "resource_client_id": "",
         "resource_client_secret": "",
-        "actor_access_token": ""
+        "actor_access_token": "",
+        "actor_application_id": ""
       },
-      "dataPropertyOrder": null,
-      "color": null,
-      "isPrivate": false,
-      "metaSortKey": 0,
+      "isPrivate": true,
       "_type": "environment"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_1",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_1",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "01 - Get Admin Access Token",
       "url": "{{ _.tenant_url }}/oauth2/token",
-      "name": "01 Get Admin Access Token",
-      "description": "",
       "method": "POST",
       "body": {
         "mimeType": "application/x-www-form-urlencoded",
-        "text": "grant_type=client_credentials&client_id={{ _.admin_client_id }}&client_secret={{ _.admin_client_secret }}"
+        "params": [
+          {
+            "name": "grant_type",
+            "value": "client_credentials",
+            "disabled": false
+          },
+          {
+            "name": "client_id",
+            "value": "{{ _.admin_client_id }}",
+            "disabled": false
+          },
+          {
+            "name": "client_secret",
+            "value": "{{ _.admin_client_secret }}",
+            "disabled": false
+          }
+        ]
       },
-      "parameters": [],
       "headers": [
         {
           "name": "Content-Type",
           "value": "application/x-www-form-urlencoded"
         }
       ],
+      "parameters": [],
       "authentication": {},
-      "metaSortKey": -1000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 1,
+      "description": "Purpose: Authenticate setup operations with the administrative API client.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to admin_access_token. If 401, check this client ID/secret. After entitlement changes obtain a fresh token.",
       "_type": "request"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_2",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_2",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "03 - DCR - Create UC2 Actor Client",
       "url": "{{ _.tenant_url }}/oauth2/register",
-      "name": "02 DCR Create UC2 Actor Client",
-      "description": "",
       "method": "POST",
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"client_name\": \"UC2 Course MCP Conversational Agent\",\n  \"grant_types\": [\n    \"client_credentials\"\n  ],\n  \"scope\": \"agent.run\",\n  \"token_endpoint_auth_method\": \"client_secret_post\"\n}"
       },
-      "parameters": [],
       "headers": [
         {
           "name": "Authorization",
@@ -95,31 +91,22 @@
           "value": "application/json"
         }
       ],
+      "parameters": [],
       "authentication": {},
-      "metaSortKey": -2000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 3,
+      "description": "Purpose: Create the OAuth application supplying runtime credentials.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201; copy client_id and client_secret to actor_client_id and actor_client_secret. This client_id is not the AgentID.",
       "_type": "request"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_3",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_3",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "02 - Onboard Agent",
       "url": "{{ _.tenant_url }}/v1.0/Agents",
-      "name": "03 Create Agent and Associate Actor Client",
-      "description": "",
       "method": "POST",
       "body": {
-        "mimeType": "application/json",
-        "text": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"Course MCP Conversational Agent\",\n  \"oauthClients\": [\n    {\n      \"issuer\": \"{{ _.actor_client_reference }}\",\n      \"clientId\": \"{{ _.actor_client_id }}\",\n      \"purposes\": [\n        \"agent_id\",\n        \"authentication\"\n      ]\n    }\n  ],\n  \"status\": \"ACTIVE\",\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\"\n  ]\n}"
+        "mimeType": "application/scim+json",
+        "text": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ]\n}"
       },
-      "parameters": [],
       "headers": [
         {
           "name": "Authorization",
@@ -128,114 +115,230 @@
         {
           "name": "Content-Type",
           "value": "application/scim+json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/scim+json"
         }
       ],
+      "parameters": [],
       "authentication": {},
-      "metaSortKey": -3000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 2,
+      "description": "Purpose: Create the governed identity before associating runtime credentials.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201; copy id to agent_id. Expected name: UC2 Course MCP Conversational Agent. Reuse an existing record instead of creating duplicates.",
       "_type": "request"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_4",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_4",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "04 - Get Agent Details",
       "url": "{{ _.tenant_url }}/v1.0/Agents/{{ _.agent_id }}",
-      "name": "04 Get Agent Details",
-      "description": "",
       "method": "GET",
-      "body": {
-        "mimeType": "application/x-www-form-urlencoded",
-        "text": ""
-      },
-      "parameters": [],
+      "body": {},
       "headers": [
         {
           "name": "Authorization",
           "value": "Bearer {{ _.admin_access_token }}"
+        },
+        {
+          "name": "Accept",
+          "value": "application/scim+json"
         }
       ],
+      "parameters": [],
       "authentication": {},
-      "metaSortKey": -4000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 4,
+      "description": "Purpose: Read the specific created agent and inspect lifecycle and credential association.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; id must equal agent_id. Repeat after activation/suspension. Verify application association in the console.",
       "_type": "request"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_5",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_5",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "05 - Associate Actor Application with Agent",
+      "url": "{{ _.tenant_url }}/v1.0/applications/{{ _.actor_application_id }}",
+      "method": "PATCH",
+      "body": {
+        "mimeType": "application/json-patch+json",
+        "text": "[\n  {\n    \"op\": \"replace\",\n    \"path\": \"tags\",\n    \"value\": [\n      \"purpose=agent_id\"\n    ]\n  },\n  {\n    \"op\": \"add\",\n    \"path\": \"/providers/oidc/properties\",\n    \"value\": {\n      \"entityType\": \"agent\",\n      \"entityId\": \"{{ _.agent_id }}\"\n    }\n  }\n]"
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.admin_access_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json-patch+json"
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 5,
+      "description": "Purpose: Bind the runtime application to the registry AgentID and mark its purpose.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 204 with no body. actor_application_id is the application management ID. Requires manageAppAccessAdmin. Replaces tags: preserve other tags on customized applications. Verify association in Identity & authentication.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples.",
+      "_type": "request"
+    },
+    {
+      "_id": "req_wrk_uc2_ibm_verify_setup_6",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "06 - Activate Agent",
+      "url": "{{ _.tenant_url }}/v1.0/Agents/{{ _.agent_id }}",
+      "method": "PUT",
+      "body": {
+        "mimeType": "application/scim+json",
+        "text": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"ACTIVE\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.admin_access_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/scim+json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/scim+json"
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 6,
+      "description": "Purpose: Make the sample agent active for fresh runtime authentication.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; rerun 04 and confirm ACTIVE and association. Obtain a fresh actor token. Preserve customized metadata when adapting lifecycle PUT.",
+      "_type": "request"
+    },
+    {
+      "_id": "req_wrk_uc2_ibm_verify_setup_7",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "07 - Suspend Agent",
+      "url": "{{ _.tenant_url }}/v1.0/Agents/{{ _.agent_id }}",
+      "method": "PUT",
+      "body": {
+        "mimeType": "application/scim+json",
+        "text": "{\n  \"schemas\": [\n    \"urn:ietf:params:scim:schemas:core:ibm:2.0:Agent\"\n  ],\n  \"displayName\": \"UC2 Course MCP Conversational Agent\",\n  \"description\": \"Conversational AI agent that invokes protected course tools\",\n  \"permissions\": [],\n  \"tags\": [\n    \"course-agent\",\n    \"mcp-tools\",\n    \"conversational-ai\"\n  ],\n  \"status\": \"SUSPENDED\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.admin_access_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/scim+json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/scim+json"
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 7,
+      "description": "Purpose: Optional negative test: suspend the agent and test a fresh runtime request.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; rerun 04. Record the actual denial stage in a new token request. Reactivate with 06. Previously issued JWTs may remain usable until expiry.",
+      "_type": "request"
+    },
+    {
+      "_id": "req_wrk_uc2_ibm_verify_setup_8",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "08 - Get Actor Token",
       "url": "{{ _.tenant_url }}/oauth2/token",
-      "name": "05 Get Actor Token",
-      "description": "",
       "method": "POST",
       "body": {
         "mimeType": "application/x-www-form-urlencoded",
-        "text": "grant_type=client_credentials&client_id={{ _.actor_client_id }}&client_secret={{ _.actor_client_secret }}&scope={{ _.actor_scope }}"
+        "params": [
+          {
+            "name": "grant_type",
+            "value": "client_credentials",
+            "disabled": false
+          },
+          {
+            "name": "client_id",
+            "value": "{{ _.actor_client_id }}",
+            "disabled": false
+          },
+          {
+            "name": "client_secret",
+            "value": "{{ _.actor_client_secret }}",
+            "disabled": false
+          },
+          {
+            "name": "scope",
+            "value": "{{ _.actor_scope }}",
+            "disabled": false
+          }
+        ]
       },
-      "parameters": [],
       "headers": [
         {
           "name": "Content-Type",
           "value": "application/x-www-form-urlencoded"
         }
       ],
+      "parameters": [],
       "authentication": {},
-      "metaSortKey": -5000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 8,
+      "description": "Purpose: Authenticate the runtime OAuth application to obtain an actor token representing the registered agent.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to actor_access_token; run 10. actor sub must be the registry agent_id, not actor_client_id.",
       "_type": "request"
     },
     {
-      "_id": "req_wrk_uc2_ucibmverifys_6",
-      "parentId": "wrk_uc2_ucibmverifys",
-      "modified": 0,
-      "created": 0,
+      "_id": "req_wrk_uc2_ibm_verify_setup_9",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "09 - Register MCP ADT",
+      "url": "{{ _.tenant_url }}/v1.0/auth-detail-types",
+      "method": "POST",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"type\": \"urn:ibm:demo:verify:agent_action\",\n  \"schema\": \"{\\\"description\\\": \\\"Agent action authorization details for the IBM Verify conversational AI MCP tools sample\\\", \\\"type\\\": \\\"object\\\", \\\"required\\\": [\\\"type\\\", \\\"courseId\\\", \\\"operationDetails\\\"], \\\"additionalProperties\\\": false, \\\"properties\\\": {\\\"type\\\": {\\\"type\\\": \\\"string\\\", \\\"const\\\": \\\"urn:ibm:demo:verify:agent_action\\\"}, \\\"courseId\\\": {\\\"type\\\": \\\"string\\\"}, \\\"operationDetails\\\": {\\\"type\\\": \\\"object\\\", \\\"required\\\": [\\\"creator\\\", \\\"affectedPerson\\\", \\\"loggedInSubject\\\", \\\"action\\\", \\\"targetSystem\\\", \\\"resource\\\", \\\"toolName\\\", \\\"downstreamSystem\\\"], \\\"additionalProperties\\\": false, \\\"properties\\\": {\\\"creator\\\": {\\\"type\\\": \\\"string\\\"}, \\\"affectedPerson\\\": {\\\"type\\\": \\\"string\\\"}, \\\"loggedInSubject\\\": {\\\"type\\\": \\\"string\\\"}, \\\"action\\\": {\\\"type\\\": \\\"string\\\", \\\"enum\\\": [\\\"list_available_courses\\\", \\\"list_enrolled_courses\\\", \\\"enroll_course\\\", \\\"delete_course_history\\\"]}, \\\"targetSystem\\\": {\\\"type\\\": \\\"string\\\"}, \\\"resource\\\": {\\\"type\\\": \\\"string\\\"}, \\\"toolName\\\": {\\\"type\\\": \\\"string\\\", \\\"enum\\\": [\\\"list_available_courses\\\", \\\"list_enrolled_courses\\\", \\\"enroll_course\\\", \\\"delete_course_history\\\"]}, \\\"downstreamSystem\\\": {\\\"type\\\": \\\"string\\\"}}}}}\",\n  \"inlineMode\": true,\n  \"description\": \"Agent action authorization details for the Course Agent sample\",\n  \"useCustomMapping\": false,\n  \"signatureStrategy\": \"full_hash\",\n  \"consentInlineText\": \"JE9JRENfQVVUSERFVEFJTF9MQUJFTF9TVERUSVRMRSQ8YnIvPiRPSURDX0FVVEhERVRBSUxfTEFCRUxfU1RESUQkIHthZC5pZGVudGlmaWVyfQ\",\n  \"consentLabel\": \"\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.admin_access_token }}"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Accept",
+          "value": "application/json"
+        }
+      ],
+      "parameters": [],
+      "authentication": {},
+      "metaSortKey": 9,
+      "description": "Purpose: Optional setup: register the authorization-details schema accepted by Verify.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 201. If type exists, inspect/update via console; do not duplicate it or remove UC1 fields. See payloads/agent_action_adt_schema.json.",
+      "_type": "request"
+    },
+    {
+      "_id": "req_wrk_uc2_ibm_verify_setup_10",
+      "parentId": "wrk_uc2_ibm_verify_setup",
+      "name": "10 - Introspect Actor Token",
       "url": "{{ _.tenant_url }}/oauth2/introspect",
-      "name": "06 Introspect Actor Token",
-      "description": "",
       "method": "POST",
       "body": {
         "mimeType": "application/x-www-form-urlencoded",
-        "text": "token={{ _.actor_access_token }}"
+        "params": [
+          {
+            "name": "token",
+            "value": "{{ _.actor_access_token }}",
+            "disabled": false
+          }
+        ]
       },
-      "parameters": [],
       "headers": [
         {
           "name": "Content-Type",
           "value": "application/x-www-form-urlencoded"
         }
       ],
+      "parameters": [],
       "authentication": {
         "type": "basic",
         "username": "{{ _.resource_client_id }}",
         "password": "{{ _.resource_client_secret }}"
       },
-      "metaSortKey": -6000,
-      "isPrivate": false,
-      "settingStoreCookies": true,
-      "settingSendCookies": true,
-      "settingDisableRenderRequestBody": false,
-      "settingEncodeUrl": true,
-      "settingRebuildPath": true,
-      "settingFollowRedirects": "global",
+      "metaSortKey": 10,
+      "description": "Purpose: Verify actual actor identity before configuring delegation or calling tools.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; active=true, sub=agent_id, client_id=actor_client_id. Use a client authorized to introspect this token (resource_client_id/secret; your Token Exchange client may be permitted). Configure subject may_act.sub=agent_id, keep human sub unchanged.",
       "_type": "request"
     }
   ]

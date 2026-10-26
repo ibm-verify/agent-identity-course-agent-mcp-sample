@@ -1,0 +1,1470 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>UC2 setup and runtime guide</title><style>body{font:16px/1.65 system-ui,sans-serif;max-width:1040px;margin:40px auto;padding:0 24px;color:#1b2838}h1,h2,h3{line-height:1.25;margin-top:2em}table{border-collapse:collapse;width:100%;margin:20px 0}td,th{border:1px solid #cbd5e1;padding:10px;text-align:left;vertical-align:top}th{background:#eaf1fa}pre{background:#eff3f8;padding:18px;overflow:auto;border-radius:6px}code{font-size:.9em}a{color:#0951a5}hr{margin:60px 0}</style></head><body><!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>Set up UC2: secure MCP tool calls with IBM Verify</h1>
+<p><a href="../README.md">README</a> · <a href="architecture.md">Architecture</a> · <a href="setup-and-api-walkthrough.md">Postman and Insomnia</a> · <a href="runtime-and-troubleshooting.md">Runtime checks</a></p>
+<h2>Goal and execution path</h2>
+<p>Create a governed course agent, associate its runtime OAuth application, and let it call MCP tools on behalf of a signed-in human. Each step explains its purpose and the evidence needed before continuing.</p>
+<p>Use the cURL commands below or the <a href="curl-walkthrough.md">direct cURL walkthrough</a>. Postman and Insomnia are alternatives described in the <a href="setup-and-api-walkthrough.md">API client walkthrough</a>. Both routes share the console configuration in Steps 4–6. Do not create the same objects again in each client. </p>
+<p>Run commands from the extracted project folder in a Bash or zsh terminal. Install curl, jq and Python 3.11–3.13. On macOS with Homebrew: <code>brew install jq python@3.11</code>.</p>
+<p>Read the IBM Agent Identity concepts articles before starting.</p>
+<h3>Applications used in this tutorial</h3>
+<table>
+<thead>
+<tr>
+<th>Application</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Human sign-in application</td>
+<td>Sign in the user with Authorization Code + PKCE</td>
+</tr>
+<tr>
+<td>Agent runtime OAuth application</td>
+<td>Obtain the agent identity token using Client Credentials</td>
+</tr>
+<tr>
+<td>UC2 Course MCP Agent Token Exchange</td>
+<td>Obtain delegated access for the requested MCP operation</td>
+</tr>
+</tbody></table>
+<h2>Step 1 — Prepare administrative access</h2>
+<p><strong>Why:</strong> Setup calls need an administrative token with rights to create agents, register clients and associate an application.</p>
+<p><strong>If omitted or incorrect:</strong> An empty/expired token prevents API access; insufficient entitlements produce authorization errors such as HTTP 403 on the association PATCH.</p>
+<p>Create an administrative API client in <strong>Security → API access</strong> (navigation labels can vary by tenant). Record its client ID and secret.</p>
+<table>
+<thead>
+<tr>
+<th>Entitlement</th>
+<th>API entitlement</th>
+<th>Required for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Configure AI agents</td>
+<td><code>writeAgents</code></td>
+<td>Create/update the registry record</td>
+</tr>
+<tr>
+<td>Manage AI agents</td>
+<td><code>manageAgentStatus</code></td>
+<td>Activate/suspend the agent</td>
+</tr>
+<tr>
+<td>Manage OIDC client registration dynamically</td>
+<td><code>manageOidcDynamicClient</code></td>
+<td>Register the runtime OAuth client</td>
+</tr>
+<tr>
+<td>Manage application lifecycle</td>
+<td><code>manageAppAccessAdmin</code></td>
+<td>Associate the runtime application through PATCH</td>
+</tr>
+<tr>
+<td>Manage authorization detail types</td>
+<td><code>manageAuthDetailTypes</code></td>
+<td>Register the ADT if it does not exist</td>
+</tr>
+<tr>
+<td>Read Users</td>
+<td><code>readUsers</code></td>
+<td>Optional named-user directory lookup</td>
+</tr>
+</tbody></table>
+<p>After adding entitlements, obtain a <strong>new</strong> administrative token. An existing token does not automatically gain the new permissions.</p>
+<p>Load the setup helper in each new terminal session. It provides the <code>setup_request</code> and <code>setup_field</code> commands used below. Replace <code>&lt;tenantname&gt;</code> with your tenant hostname.</p>
+<pre><code class="language-bash">export TENANT=&#39;https://&lt;tenantname&gt;&#39;
+export ADMIN_CLIENT_ID=&#39;PASTE_ADMIN_API_CLIENT_ID&#39;
+export ADMIN_CLIENT_SECRET=&#39;PASTE_ADMIN_API_CLIENT_SECRET&#39;
+export TENANT=&quot;${TENANT%/}&quot;
+source curl/setup-session.sh
+
+unset ADMIN_ACCESS_TOKEN
+if setup_request 200 .local/admin-token.json \
+  -X POST &quot;$TENANT/oauth2/token&quot; \
+  -H &#39;Content-Type: application/x-www-form-urlencoded&#39; \
+  --data-urlencode &#39;grant_type=client_credentials&#39; \
+  --data-urlencode &quot;client_id=$ADMIN_CLIENT_ID&quot; \
+  --data-urlencode &quot;client_secret=$ADMIN_CLIENT_SECRET&quot;; then
+  if value=$(setup_field .local/admin-token.json access_token); then
+    export ADMIN_ACCESS_TOKEN=&quot;$value&quot;
+    unset value
+    printf &#39;Administrative token loaded.\n&#39;
+  fi
+fi
+</code></pre>
+<p><strong>Completion check:</strong> HTTP 200 and “Administrative token loaded.” Check presence with <code>printf &#39;Token length: %s\n&#39; &quot;${#ADMIN_ACCESS_TOKEN}&quot;</code>; do not print the token. A 301 is a redirect, not success. The helper checks exact expected status codes, does not follow redirects, and saves bodies under <code>.local/</code>. Stop at any unexpected status before running the next block. A 401 at <code>/oauth2/token</code> calls for checking the administrative client credentials.</p>
+<h2>Step 2 — Create the registry identity and runtime client</h2>
+<p><strong>Why:</strong> The registry record supplies the durable AgentID; the OAuth client supplies replaceable credentials used to obtain an actor token.</p>
+<p><strong>If omitted or incorrect:</strong> The application cannot authenticate as the registered agent.</p>
+<p>If these objects already exist, reuse their IDs and credentials. Otherwise run:</p>
+<pre><code class="language-bash">unset AGENT_ID
+if setup_request 201 .local/agent-created.json \
+  -X POST &quot;$TENANT/v1.0/Agents&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; -H &#39;Content-Type: application/scim+json&#39; \
+  --data-binary @curl/payloads/course-mcp-agent.json; then
+  if value=$(setup_field .local/agent-created.json id); then
+    export AGENT_ID=&quot;$value&quot;
+    unset value
+    jq &#39;{id,displayName,status}&#39; .local/agent-created.json
+  fi
+fi
+</code></pre>
+<p>Expected name: <strong>UC2 Course MCP Conversational Agent</strong>. Inspect the actual initial status; creation alone does not establish runtime readiness.</p>
+<pre><code class="language-bash">unset ACTOR_CLIENT_ID ACTOR_CLIENT_SECRET
+if setup_request 201 .local/actor-created.json \
+  -X POST &quot;$TENANT/oauth2/register&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  --data-binary @curl/payloads/actor-client-dcr.json; then
+  if client_id=$(setup_field .local/actor-created.json client_id) &amp;&amp; \
+     client_secret=$(setup_field .local/actor-created.json client_secret); then
+    export ACTOR_CLIENT_ID=&quot;$client_id&quot;
+    export ACTOR_CLIENT_SECRET=&quot;$client_secret&quot;
+    unset client_id client_secret
+    printf &#39;Runtime OAuth credentials loaded.\n&#39;
+  fi
+fi
+</code></pre>
+<p>DCR must be enabled and permit the administrative bearer token. <strong>Completion check:</strong> both requests return 201, and nonempty <code>AGENT_ID</code>, <code>ACTOR_CLIENT_ID</code> and <code>ACTOR_CLIENT_SECRET</code> have been captured. These exports apply to this terminal; they do not populate the runtime <code>.env</code> automatically.</p>
+<p>Retrieve only the created agent:</p>
+<pre><code class="language-bash">setup_request 200 .local/agent-current.json \
+  &quot;$TENANT/v1.0/Agents/$AGENT_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; &amp;&amp; \
+  jq &#39;{id,displayName,status,oauthClients}&#39; .local/agent-current.json
+</code></pre>
+<p>The collection endpoint <code>/v1.0/Agents</code> lists tenant agents and may be paginated. It does not select the agent you just created.</p>
+<h2>Step 3 — Associate and activate the agent</h2>
+<p><strong>Why:</strong> Association tells Verify that this OAuth application authenticates the registered agent; activation establishes the required lifecycle state.</p>
+<p><strong>If omitted or incorrect:</strong> The runtime token may not represent the expected AgentID, or fresh runtime access may be denied by lifecycle controls.</p>
+<h3>Find the application ID</h3>
+<ol>
+<li>Open <strong>Applications → Applications</strong> in the Verify administration console.</li>
+<li>Open <strong>UC2 Course MCP Conversational Agent</strong>.</li>
+<li>Confirm its OAuth client ID matches the <code>ACTOR_CLIENT_ID</code> returned in Step 2.</li>
+<li>Copy the application ID from the application&#39;s details or the browser address. In a management route containing <code>/applications/7201665295314100044</code>, the application ID is <code>7201665295314100044</code>. The surrounding console route may vary.</li>
+<li>Set <code>ACTOR_APPLICATION_ID</code> to the copied value below.</li>
+</ol>
+<p>Use the ID of the application management record for this PATCH request.</p>
+<pre><code class="language-bash">export ACTOR_APPLICATION_ID=&#39;PASTE_RUNTIME_APPLICATION_MANAGEMENT_ID&#39;
+jq --arg agent_id &quot;$AGENT_ID&quot; \
+  &#39;map(if .path == &quot;/providers/oidc/properties&quot; then .value.entityId = $agent_id else . end)&#39; \
+  curl/payloads/actor-application-associate.json &gt; .local/actor-associate.json
+
+setup_request 204 .local/association-response.json \
+  -X PATCH &quot;$TENANT/v1.0/applications/$ACTOR_APPLICATION_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json-patch+json&#39; \
+  --data-binary @.local/actor-associate.json
+</code></pre>
+<p>The payload sets <code>purpose=agent_id</code> and associates <code>entityType=agent</code>, <code>entityId=AGENT_ID</code>. <strong>HTTP 204 with no body is success.</strong> The <code>replace</code> operation replaces application tags; preserve any other tags on an existing customized application. The IBM API uses <code>path: &quot;tags&quot;</code> for this operation. Do not send this application PATCH payload to DCR PUT.</p>
+<p>Open <strong>Identities → AI agents → your agent → Identity &amp; authentication</strong> and verify the application association. Activate using:</p>
+<pre><code class="language-bash">setup_request 200 .local/agent-activated.json \
+  -X PUT &quot;$TENANT/v1.0/Agents/$AGENT_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; -H &#39;Content-Type: application/scim+json&#39; \
+  --data-binary @curl/payloads/course-mcp-agent-activate.json
+
+setup_request 200 .local/agent-current.json \
+  &quot;$TENANT/v1.0/Agents/$AGENT_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; &amp;&amp; \
+  jq &#39;{id,displayName,status,oauthClients}&#39; .local/agent-current.json
+</code></pre>
+<p><strong>Completion check:</strong> the agent is <code>ACTIVE</code> and its runtime application is listed under <strong>Identity &amp; authentication</strong>. Preserve custom metadata when adapting the sample lifecycle payloads.</p>
+<h2>Step 4 — Configure the human subject application</h2>
+<p><strong>Why:</strong> Establish which human has signed in and which registered agent may use that human’s delegated authority.</p>
+<p><strong>If omitted or incorrect:</strong> Without sign-in entitlements the human cannot access the app. Without a matching delegation relationship Token Exchange can fail with <code>CSIAQ5201E</code>.</p>
+<p><strong>Completion check:</strong> the test user can sign in and the delegation mapping contains the AgentID recorded in Step 2.</p>
+<p>Create the OIDC application used by the browser chat.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Sample value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Grant</td>
+<td>Authorization Code</td>
+</tr>
+<tr>
+<td>PKCE</td>
+<td>S256 / required</td>
+</tr>
+<tr>
+<td>Redirect URI</td>
+<td><code>http://localhost:8000/callback</code></td>
+</tr>
+<tr>
+<td>OIDC scopes</td>
+<td><code>openid profile email</code></td>
+</tr>
+<tr>
+<td>Subject access-token format</td>
+<td><strong>Default (opaque) is supported; JWT is optional</strong></td>
+</tr>
+<tr>
+<td>ID token</td>
+<td>Required; used to establish the logged-in human user</td>
+</tr>
+</tbody></table>
+<p>Capture:</p>
+<pre><code class="language-text">SUBJECT_CLIENT_ID=&lt;subject client ID&gt;
+SUBJECT_CLIENT_SECRET=&lt;subject client secret&gt;
+</code></pre>
+<h3>Human identity comes from the ID token</h3>
+<p>The browser login deliberately separates <strong>identity</strong> from the OAuth access token:</p>
+<pre><code class="language-mermaid">flowchart TD
+    B[&quot;Browser sign-in&quot;] --&gt; V[&quot;Verify: Authorization Code + PKCE&quot;]
+    V --&gt; ID[&quot;ID token&quot;]
+    V --&gt; AT[&quot;Subject access token: Default or JWT&quot;]
+    ID --&gt; Q{&quot;Signature, issuer, audience and nonce valid?&quot;}
+    Q --&gt;|&quot;Yes&quot;| I[&quot;Logged-in human identity&quot;]
+    Q --&gt;|&quot;No&quot;| D[&quot;Reject login&quot;]
+    AT --&gt; TE[&quot;Token Exchange subject_token: access_token type&quot;]
+</code></pre>
+<p>The application does <strong>not</strong> decode the subject access token to decide who logged in.
+Therefore the subject application works whether its access token is JWT-formatted or opaque.
+The access token is still sent to Token Exchange as:</p>
+<pre><code class="language-text">subject_token_type=urn:ietf:params:oauth:token-type:access_token
+</code></pre>
+<p><code>verify_oauth.py</code> sends an OIDC <code>nonce</code> on the authorization request. <code>app.py</code> validates the returned <code>id_token</code> through <code>verify_id_token()</code> and stores only the access token plus validated ID-token claims in the browser session.</p>
+<h3>Allow the agent to act for the user</h3>
+<p>The subject token represents the signed-in human user. During token exchange, IBM Verify must also validate whether the agent represented by the actor token is permitted to act on behalf of that user.</p>
+<p>This sample uses the OAuth may_act relationship for this validation.</p>
+<ol>
+<li><p>Open the <strong>Introspect</strong> endpoint configuration.</p>
+</li>
+<li><p>Add an introspection attribute mapping.</p>
+</li>
+<li><p>Select <strong>Custom rule</strong> as the source.</p>
+</li>
+<li><p>In the custom rule, enter:</p>
+<pre><code class="language-json">{
+  &quot;sub&quot;: &quot;&lt;registry-agent-id&gt;&quot;
+}
+</code></pre>
+<p>Use the <strong>AgentID</strong> returned in Step 2. You can also find it under <strong>Identities → AI agents → your agent</strong>.</p>
+</li>
+<li><p>Set the <strong>Target attribute</strong> to:</p>
+<pre><code class="language-text">may_act
+</code></pre>
+</li>
+<li><p>Save the mapping.</p>
+</li>
+</ol>
+<p>The resulting delegation mapping is:</p>
+<pre><code class="language-json">{
+  &quot;may_act&quot;: {
+    &quot;sub&quot;: &quot;&lt;registry-agent-id&gt;&quot;
+  }
+}
+</code></pre>
+<p>This mapping allows the selected agent to act on behalf of the signed-in user.</p>
+<h3>Application entitlements</h3>
+<p>After completing the Sign-on configuration, configure who is allowed to access the application.</p>
+<ol>
+<li><p>Open the <strong>Entitlements</strong> tab for <code>UC2_subject_token</code>.</p>
+</li>
+<li><p>Select:</p>
+<p><strong>All users are entitled to this application</strong></p>
+</li>
+<li><p>Save the configuration.</p>
+</li>
+</ol>
+<p>This tutorial uses <strong>All users are entitled to this application</strong> so that the test human user can sign in to the Course MCP Agent Application without requiring an additional user or group assignment.</p>
+<blockquote>
+<p><strong>Why is this required?</strong>  </p>
+</blockquote>
+<blockquote>
+<p>Creating the OIDC application and enabling the Authorization Code grant does not by itself grant users access to the application. IBM Verify also evaluates the application&#39;s entitlement configuration during sign-in. If the signed-in user is not entitled to the application, authentication fails with an error similar to:</p>
+<pre><code class="language-text">Only entitled users can single sign-on to the application.
+</code></pre>
+<p>For this tutorial, allowing all users keeps the setup simple. In a production deployment, access should normally be restricted to the users or groups that are authorized to use the application.</p>
+</blockquote>
+<p>Keep <strong>Skip default actor validation</strong> disabled on the Token Exchange client for this <code>may_act</code> setup. Actor Criteria is an alternative configuration, not an additional requirement: if your tenant uses it instead, configure an explicit allow rule before skipping the default check. See <a href="https://www.ibm.com/docs/en/security-verify?topic=clients-actor-criteria">Actor criteria</a>.</p>
+<h2>Step 5 — Create the MCP Authorization Details Type</h2>
+<p><strong>Why:</strong> Define the structure of the exact tool operation that Verify will evaluate and carry into the delegated token.</p>
+<p><strong>If omitted or incorrect:</strong> A missing or incompatible type can reject <code>authorization_details</code> before tool execution.</p>
+<p><strong>Completion check:</strong> The registered schema accepts <code>courseId</code> and every <code>operationDetails</code> field built by this package.</p>
+<p>The sample uses:</p>
+<pre><code class="language-text">urn:ibm:demo:verify:agent_action
+</code></pre>
+<p>Use the exact schema in:</p>
+<pre><code class="language-text">payloads/agent_action_adt_schema.json
+</code></pre>
+<p>The actual <code>rar_builder.py</code> payload is shaped like:</p>
+<pre><code class="language-json">[
+  {
+    &quot;type&quot;: &quot;urn:ibm:demo:verify:agent_action&quot;,
+    &quot;courseId&quot;: &quot;SEC-301&quot;,
+    &quot;operationDetails&quot;: {
+      &quot;creator&quot;: &quot;&lt;actor-client-id&gt;&quot;,
+      &quot;affectedPerson&quot;: &quot;&lt;target-subject&gt;&quot;,
+      &quot;loggedInSubject&quot;: &quot;&lt;signed-in-subject&gt;&quot;,
+      &quot;action&quot;: &quot;enroll_course&quot;,
+      &quot;targetSystem&quot;: &quot;course-mcp-server&quot;,
+      &quot;resource&quot;: &quot;mcp-tool&quot;,
+      &quot;toolName&quot;: &quot;enroll_course&quot;,
+      &quot;downstreamSystem&quot;: &quot;course-api&quot;
+    }
+  }
+]
+</code></pre>
+<p>The schema included with this package matches these fields exactly.</p>
+<p>For this version, the ADT action and <code>toolName</code> enums contain four recognized intents:</p>
+<pre><code class="language-text">list_available_courses
+list_enrolled_courses
+enroll_course
+delete_course_history
+</code></pre>
+<p><code>delete_course_history</code> is registered as a real MCP tool for the <strong>scope-denial test</strong>. The supplied Verify mapping grants only <code>mcp.tools.invoke</code>; the gateway additionally requires <code>course.delete</code>, so the published handler is denied before execution.</p>
+<h3>Register the ADT with cURL, Postman, Insomnia, or UI</h3>
+<p>Use UC2&#39;s schema, which includes <code>toolName</code>, <code>targetSystem=course-mcp-server</code>, <code>resource=mcp-tool</code>, and <code>downstreamSystem</code>. If UC1 already registered the same type name in this tenant, inspect its schema and update it to support these MCP fields before running UC2. Do not blindly create a duplicate or remove fields needed by UC1.</p>
+<pre><code class="language-bash"># Use 201 for the documented ADT creation response; inspect an unexpected status.
+setup_request 201 .local/adt-created.json \
+  -X POST &quot;$TENANT/v1.0/auth-detail-types&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  --data-binary @payloads/agent_action_adt_registration.json
+</code></pre>
+<p>In Postman or Insomnia, run <strong>09 Register MCP ADT</strong> only if the type does not exist. If it exists, use <strong>Applications → Authorization detail types</strong>, open the type, and replace/merge its schema using <code>payloads/agent_action_adt_schema.json</code>. For a new type, click <strong>Create → Standard</strong>, enter the type name above, paste that schema and save. Consent-display text may use <code>{ad.courseId}</code>; display text does not enforce authorization.</p>
+<h3>Why <code>toolName</code> matters</h3>
+<p>The token-exchange request is created <strong>before</strong> the MCP tool call. The authorization detail says:</p>
+<pre><code class="language-text">toolName = enroll_course
+</code></pre>
+<p>Later, the MCP client performs:</p>
+<pre><code class="language-python">await session.call_tool(&quot;enroll_course&quot;, arguments)
+</code></pre>
+<p>At the MCP server boundary, <code>mcp_gateway.py</code> compares the actual tool invocation with the authorized operation context.</p>
+<p>The sample is designed to deny this mismatch:</p>
+<pre><code class="language-text">authorization_details.toolName = list_available_courses
+actual MCP tools/call name      = enroll_course
+</code></pre>
+<p>Tool discovery therefore does not grant permission to reuse a delegated token for a different tool.</p>
+<h2>Step 6 — Configure the Token Exchange application</h2>
+<p><strong>Why:</strong> Exchange the human and agent tokens for a JWT limited to the approved MCP operation and audience.</p>
+<p><strong>If omitted or incorrect:</strong> Wrong output format, missing entitlements, delegation settings or consent mapping prevents issuance or causes resource validation to fail.</p>
+<p><strong>Completion check:</strong> An allowed list operation issues a JWT for <code>course-mcp-server</code> with <code>mcp.tools.invoke course.read</code>, the approved authorization details and <code>act.sub=AGENT_ID</code>.</p>
+<p>Create an OpenID Connect application with the Token Exchange grant.</p>
+<p>The application sends:</p>
+<pre><code class="language-text">grant_type          = urn:ietf:params:oauth:grant-type:token-exchange
+subject_token        = human access token (JWT or opaque)
+subject_token_type   = urn:ietf:params:oauth:token-type:access_token
+actor_token          = AI agent access token
+actor_token_type     = urn:ietf:params:oauth:token-type:access_token
+audience             = course-mcp-server
+authorization_details = MCP tool invocation context
+</code></pre>
+<p><strong>There is no hard-coded <code>scope=</code> parameter in the Token Exchange request.</strong> The delegated scopes are derived by IBM Verify from the authorization detail that is actually granted.</p>
+<h3>Create the Token Exchange application</h3>
+<ol>
+<li>Open <strong>Applications → Add application → OpenID Connect</strong> and name it <code>UC2 Course MCP Agent Token Exchange</code>; complete the company name.</li>
+<li>Under <strong>Sign-on configuration</strong>, enable <strong>Token Exchange</strong> and require an actor token.</li>
+<li>Set subject and actor token types to <code>urn:ietf:params:oauth:token-type:access_token</code>.</li>
+<li>Under token settings, select <strong>JWT</strong> for the <strong>delegated output access token</strong>, and set audience to <code>course-mcp-server</code>. This output format is distinct from the human subject access-token format.</li>
+<li>Permit <code>mcp.tools.invoke</code>, <code>course.read</code>, and <code>course.enroll</code>, and attach the ADT from Step 5.</li>
+<li>Leave <strong>Skip default actor validation</strong> disabled for the Step 4 <code>may_act</code> configuration.</li>
+<li>Open <strong>Endpoint configuration → Token → Consent request → Edit</strong> and paste the UC2 mapping below.</li>
+<li>Save the application and record its credentials as <code>STS_CLIENT_ID</code> and <code>STS_CLIENT_SECRET</code>. These are the configuration keys used by the application for Token Exchange.</li>
+</ol>
+<h3>Allow users to use the application</h3>
+<ol>
+<li>Open the <strong>Entitlements</strong> tab of <strong>UC2 Course MCP Agent Token Exchange</strong>.</li>
+<li>Select <strong>All users are entitled to this application</strong> for this tutorial.</li>
+<li>Save.</li>
+</ol>
+<p>This lets the test user use the Token Exchange application. For a restricted deployment, assign the intended users or groups.</p>
+<h3>Associate the application with the agent&#39;s OBO task</h3>
+<ol>
+<li>Open <strong>Identities → AI agents → your agent → Edit</strong>.</li>
+<li>Open <strong>Agent tasks</strong> and select <strong>Act on behalf of a user</strong>.</li>
+<li>Select <strong>UC2 Course MCP Agent Token Exchange</strong> and save.</li>
+<li>Reopen the agent and confirm both associations:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Purpose</th>
+<th>Application</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Generate agent identity token</td>
+<td>UC2 Course MCP Conversational Agent</td>
+</tr>
+<tr>
+<td>Act on behalf of a user</td>
+<td>UC2 Course MCP Agent Token Exchange</td>
+</tr>
+</tbody></table>
+<p>The runtime application provides the agent&#39;s identity. The Token Exchange application handles delegated access for its user-facing task. Confirm that the agent remains <strong>ACTIVE</strong> after saving.</p>
+<p>Postman and Insomnia exercise Token Exchange after this UI configuration. Configure the subject/Token Exchange applications, consent rule and user entitlements in the console; the supplied collections do not provision those settings.</p>
+<p>Configure the Token Exchange authorization-details mapping with the following rule:</p>
+<pre><code class="language-yaml">statements:
+  - context: &gt;
+      authzDetails := has(requestContext.authorization_details)
+      ? requestContext.authorization_details.map(x,
+          {
+            &quot;purpose&quot;: x.type,
+            &quot;attribute&quot;: x.operationDetails.resource,
+            &quot;accessType&quot;: x.operationDetails.action,
+            &quot;value&quot;: x.courseId,
+            &quot;scope&quot;:
+              x.operationDetails.action == &quot;list_available_courses&quot;
+              ? &quot;mcp.tools.invoke course.read&quot;
+              : x.operationDetails.action == &quot;list_enrolled_courses&quot;
+                ? &quot;mcp.tools.invoke course.read&quot;
+                : x.operationDetails.action == &quot;enroll_course&quot;
+                  ? &quot;mcp.tools.invoke course.enroll&quot;
+                  : x.operationDetails.action == &quot;delete_course_history&quot;
+                    ? &quot;mcp.tools.invoke&quot;
+                    : &quot;&quot;,
+            &quot;tokenClaims&quot;: {
+              &quot;authorization_details&quot;: [x]
+            }
+          })
+      : []
+
+  - return: context.authzDetails
+</code></pre>
+<p>This gives the delegated token exactly the authority associated with the approved action:</p>
+<table>
+<thead>
+<tr>
+<th>ADT action</th>
+<th>Scope populated by Token Exchange</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>list_available_courses</code></td>
+<td><code>mcp.tools.invoke course.read</code></td>
+</tr>
+<tr>
+<td><code>list_enrolled_courses</code></td>
+<td><code>mcp.tools.invoke course.read</code></td>
+</tr>
+<tr>
+<td><code>enroll_course</code></td>
+<td><code>mcp.tools.invoke course.enroll</code></td>
+</tr>
+<tr>
+<td><code>delete_course_history</code></td>
+<td><code>mcp.tools.invoke</code> only</td>
+</tr>
+</tbody></table>
+<p>The protected boundary requires <code>mcp.tools.invoke</code> plus the business scope for each of the four tools. The delete handler requires <code>course.delete</code>, but the supplied Token Exchange mapping never grants it. Keep <code>course.delete</code> out of the Token Exchange permitted scopes for this negative test.</p>
+<p>Capture:</p>
+<pre><code class="language-text"># Token Exchange application settings.
+# Keep the STS_* variable names; the application reads these keys.
+STS_CLIENT_ID=&lt;token-exchange-client-id&gt;
+STS_CLIENT_SECRET=&lt;token-exchange-client-secret&gt;
+</code></pre>
+<p>Add resource/audience</p>
+<p>This sample asks IBM Verify to issue the delegated token for:</p>
+<pre><code class="language-text">course-mcp-server
+</code></pre>
+<p>The Token Exchange client must be configured to permit the scopes that the authorization-details mapping can produce:</p>
+<pre><code class="language-text">mcp.tools.invoke
+course.read
+course.enroll
+</code></pre>
+<p>The application does not request that broad set. The rule above chooses the minimum output scope for each granted ADT action.</p>
+<h2>Step 7 — Configure the application</h2>
+<p><strong>Why:</strong> Connect the local runtime to the identities and applications configured above.</p>
+<p><strong>If omitted or incorrect:</strong> A missing or wrong <code>AGENT_ID</code> fails the local actor check even if Verify issued a valid token.</p>
+<p><strong>Completion check:</strong> <code>AGENT_ID</code> contains the ID from the agent details, and all application credentials have been entered.</p>
+<p>For a fresh local configuration:</p>
+<pre><code class="language-bash">cp .env.example .env
+python -c &#39;import secrets; print(secrets.token_urlsafe(32))&#39;
+</code></pre>
+<p>Use the generated value for <code>SESSION_SECRET</code>. Set <code>AGENT_ID</code> to the ID returned in Step 2 or shown in the agent details.</p>
+<p>Populate:</p>
+<pre><code class="language-dotenv">APP_BASE_URL=http://localhost:8000
+SESSION_SECRET=&lt;random-local-session-secret&gt;
+
+USE_LLM=false
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+
+VERIFY_ISSUER=https://&lt;tenant&gt;/oauth2
+VERIFY_AUTHORIZATION_ENDPOINT=https://&lt;tenant&gt;/oauth2/authorize
+VERIFY_TOKEN_ENDPOINT=https://&lt;tenant&gt;/oauth2/token
+VERIFY_JWKS_URI=https://&lt;tenant&gt;/oauth2/jwks
+VERIFY_INTROSPECTION_ENDPOINT=https://&lt;tenant&gt;/oauth2/introspect
+
+SUBJECT_CLIENT_ID=&lt;subject-client-id&gt;
+SUBJECT_CLIENT_SECRET=&lt;subject-client-secret&gt;
+SUBJECT_REDIRECT_URI=http://localhost:8000/callback
+SUBJECT_SCOPES=openid profile email
+
+AGENT_ID=&lt;registry-agent-id&gt;
+ACTOR_CLIENT_ID=&lt;dcr-created-actor-client-id&gt;
+ACTOR_CLIENT_SECRET=&lt;dcr-created-actor-client-secret&gt;
+ACTOR_SCOPES=agent.run
+
+# Token Exchange application settings.
+# Keep the STS_* variable names; the application reads these keys.
+STS_CLIENT_ID=&lt;token-exchange-client-id&gt;
+STS_CLIENT_SECRET=&lt;token-exchange-client-secret&gt;
+STS_AUDIENCE=course-mcp-server
+
+MCP_AUDIENCE=course-mcp-server
+MCP_SERVER_NAME=course-mcp-server
+DOWNSTREAM_SYSTEM=course-api
+MCP_FORWARD_TO_COURSE_API=false
+COURSE_API_AUDIENCE=course-api
+
+AGENT_ADT_TYPE=urn:ibm:demo:verify:agent_action
+</code></pre>
+<p>For the first run:</p>
+<pre><code class="language-dotenv">USE_LLM=false
+</code></pre>
+<p>After the complete IBM Verify and MCP flow works, enable Gemini.</p>
+<h2>Step 8 — Install and run</h2>
+<p><strong>Why:</strong> Run the host and its MCP subprocess from the same project and Python environment.</p>
+<p><strong>If omitted or incorrect:</strong> Running an older checkout or process can retain the old client-ID comparison.</p>
+<p><strong>Completion check:</strong> Health and tool discovery work, followed by a successful authorized course request.</p>
+<p>Check that <code>python3</code> points to Python 3.11–3.13 before creating the virtual environment:</p>
+<pre><code class="language-bash">python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+python -m uvicorn app:app --host 127.0.0.1 --port 8000
+</code></pre>
+<p>The application validates ID-token signatures using the tenant JWKS.</p>
+<p>Open:</p>
+<pre><code class="language-text">http://localhost:8000
+</code></pre>
+<p>The MCP server is <strong>not started manually for the basic sample</strong>. <code>mcp_client.py</code> launches <code>mcp_server.py</code> through <code>StdioServerParameters</code> when it establishes the MCP session.</p>
+<p>After filling <code>.env</code>, confirm the settings:</p>
+<pre><code class="language-bash">python -c &#39;from config import settings; print(&quot;AGENT_ID:&quot;, settings.agent_id); print(&quot;ACTOR_CLIENT_ID:&quot;, settings.actor_client_id)&#39;
+python tools/diagnose_runtime.py
+</code></pre>
+<p>Stop and restart uvicorn after <code>.env</code> changes, then sign out and sign in again. A shell variable overrides the same <code>.env</code> key; use <code>unset AGENT_ID</code> if an old exported value is present. Finish with the <a href="runtime-and-troubleshooting.md">runtime tests and audit checks</a>.</p>
+<h2>References</h2>
+<ul>
+<li><a href="https://docs.verify.ibm.com/verify/reference/patchapplication">Application association PATCH and entitlement</a></li>
+<li><a href="https://docs.verify.ibm.com/verify/reference/post_v1-0-agents">Create an agent</a></li>
+<li><a href="https://docs.verify.ibm.com/verify/reference/put_v1-0-agents-id">Replace an agent</a></li>
+<li><a href="https://docs.verify.ibm.com/verify/reference/post_oauth2-register">Dynamic client registration</a></li>
+<li><a href="https://docs.verify.ibm.com/verify/reference/createauthdetailtype">Create an authorization detail type</a></li>
+<li><a href="https://www.ibm.com/docs/en/security-verify?topic=clients-actor-criteria">Actor Criteria</a></li>
+</ul>
+<p>The optional ADT registration request uses the current documented <code>/v1.0/auth-detail-types</code> endpoint consistently in cURL, Postman and Insomnia. If an existing type is already in use, retain it and inspect/merge the schema instead of recreating it. </p>
+<hr>
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>Run UC2 with cURL</h1>
+<p><a href="setup.md">Setup</a> · <a href="audit.md">Audit</a> · <a href="setup-and-api-walkthrough.md">Postman and Insomnia</a></p>
+<p>Start with <a href="setup.md">Setup</a> for the complete first-time configuration. Use this walkthrough for the corresponding direct cURL commands. It does not require the setup helper. Complete the application, delegation and entitlement configuration described in the setup guide. Postman or Insomnia can be used for the equivalent requests.</p>
+<p>Run commands from the project folder in one terminal. At each step, continue only after the expected HTTP status and required response fields are present.</p>
+<h2>1. Obtain an administrative token</h2>
+<pre><code class="language-bash">export TENANT=&#39;https://&lt;tenantname&gt;&#39;
+export ADMIN_CLIENT_ID=&#39;PASTE_ADMIN_CLIENT_ID&#39;
+export ADMIN_CLIENT_SECRET=&#39;PASTE_ADMIN_CLIENT_SECRET&#39;
+mkdir -p .local
+chmod 700 .local
+umask 077
+
+curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/oauth2/token&quot; \
+  -H &#39;Content-Type: application/x-www-form-urlencoded&#39; \
+  --data-urlencode &#39;grant_type=client_credentials&#39; \
+  --data-urlencode &quot;client_id=$ADMIN_CLIENT_ID&quot; \
+  --data-urlencode &quot;client_secret=$ADMIN_CLIENT_SECRET&quot; \
+  -o .local/admin-token.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>200</strong>. Then capture the token:</p>
+<pre><code class="language-bash">export ADMIN_ACCESS_TOKEN=&quot;$(jq -er &#39;.access_token | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/admin-token.json)&quot;
+</code></pre>
+<p>A redirect such as 301 is not success. Confirm the tenant URL starts with <code>https://</code>. Do not extract values from an unexpected response.</p>
+<h2>2. Create the agent and runtime OAuth application</h2>
+<pre><code class="language-bash">curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/v1.0/Agents&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; \
+  -H &#39;Content-Type: application/scim+json&#39; \
+  --data-binary @curl/payloads/course-mcp-agent.json \
+  -o .local/agent-created.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>201</strong>. Capture the AgentID and check the name:</p>
+<pre><code class="language-bash">export AGENT_ID=&quot;$(jq -er &#39;.id | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/agent-created.json)&quot;
+jq &#39;{id,displayName,status}&#39; .local/agent-created.json
+
+curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/oauth2/register&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  --data-binary @curl/payloads/actor-client-dcr.json \
+  -o .local/actor-created.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>201</strong>. Capture the runtime credentials:</p>
+<pre><code class="language-bash">export ACTOR_CLIENT_ID=&quot;$(jq -er &#39;.client_id | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/actor-created.json)&quot;
+export ACTOR_CLIENT_SECRET=&quot;$(jq -er &#39;.client_secret | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/actor-created.json)&quot;
+</code></pre>
+<h2>3. Associate and activate</h2>
+<p>Find the runtime application&#39;s management ID using <a href="setup.md#find-the-application-id">setup Step 3</a>.</p>
+<pre><code class="language-bash">export ACTOR_APPLICATION_ID=&#39;PASTE_APPLICATION_MANAGEMENT_ID&#39;
+jq --arg agent_id &quot;$AGENT_ID&quot; \
+  &#39;map(if .path == &quot;/providers/oidc/properties&quot; then .value.entityId = $agent_id else . end)&#39; \
+  curl/payloads/actor-application-associate.json &gt; .local/actor-associate.json
+
+curl --silent --show-error --fail-with-body \
+  -X PATCH &quot;$TENANT/v1.0/applications/$ACTOR_APPLICATION_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json-patch+json&#39; \
+  --data-binary @.local/actor-associate.json \
+  -o .local/association-response.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>204</strong>, with no body. The supplied payload replaces application tags; retain additional tags when adapting an existing application. This request requires <strong>Manage application lifecycle</strong> on the administrative API client.</p>
+<pre><code class="language-bash">curl --silent --show-error --fail-with-body \
+  -X PUT &quot;$TENANT/v1.0/Agents/$AGENT_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; -H &#39;Content-Type: application/scim+json&#39; \
+  --data-binary @curl/payloads/course-mcp-agent-activate.json \
+  -o .local/agent-activated.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>200</strong>. Read the specific agent:</p>
+<pre><code class="language-bash">curl --silent --show-error --fail-with-body \
+  &quot;$TENANT/v1.0/Agents/$AGENT_ID&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Accept: application/scim+json&#39; \
+  -o .local/agent-current.json -w &#39;HTTP %{http_code}\n&#39;
+jq &#39;{id,displayName,status,oauthClients}&#39; .local/agent-current.json
+</code></pre>
+<p>Expected: <strong>200</strong>, ACTIVE and the runtime application association verified in the console.</p>
+<h2>4. Register the authorization detail type</h2>
+<p>For a new type:</p>
+<pre><code class="language-bash">curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/v1.0/auth-detail-types&quot; \
+  -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
+  -H &#39;Content-Type: application/json&#39; \
+  --data-binary @payloads/agent_action_adt_registration.json \
+  -o .local/adt-created.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>201</strong>. If the type already exists, inspect and update its schema in the console as described in setup Step 5.</p>
+<h2>5. Complete the shared console settings</h2>
+<p>Follow setup Steps 4–7 to configure user sign-in, the AgentID delegation mapping, Token Exchange JWT output, audience, scopes, consent mapping and application entitlements. Under <strong>Agent tasks → Act on behalf of a user</strong>, select the Token Exchange application. Populate the local <code>.env</code>.</p>
+<p>These configuration steps use the Verify console in this tutorial. The cURL requests below test the resulting flow.</p>
+<h2>6. Obtain a fresh actor token</h2>
+<pre><code class="language-bash"># Token Exchange application settings.
+# Keep the STS_* variable names; the application reads these keys.
+export STS_CLIENT_ID=&#39;PASTE_TOKEN_EXCHANGE_CLIENT_ID&#39;
+export STS_CLIENT_SECRET=&#39;PASTE_TOKEN_EXCHANGE_CLIENT_SECRET&#39;
+
+curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/oauth2/token&quot; \
+  -H &#39;Content-Type: application/x-www-form-urlencoded&#39; \
+  --data-urlencode &#39;grant_type=client_credentials&#39; \
+  --data-urlencode &quot;client_id=$ACTOR_CLIENT_ID&quot; \
+  --data-urlencode &quot;client_secret=$ACTOR_CLIENT_SECRET&quot; \
+  --data-urlencode &#39;scope=agent.run&#39; \
+  -o .local/actor-token.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>200</strong>. Then:</p>
+<pre><code class="language-bash">export ACTOR_ACCESS_TOKEN=&quot;$(jq -er &#39;.access_token | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/actor-token.json)&quot;
+</code></pre>
+<h2>7. Exchange tokens for a selected tool</h2>
+<p>Obtain the human access token using <strong>Authorization Code + PKCE</strong>. You can use the Postman/Insomnia OAuth helper described in the <a href="setup-and-api-walkthrough.md#obtain-the-actual-human-access-token-for-manual-testing">API walkthrough</a>. Register its callback URL in the human sign-in application. Use its <strong>access token</strong>, then continue with cURL:</p>
+<pre><code class="language-bash">export SUBJECT_ACCESS_TOKEN=&#39;PASTE_HUMAN_ACCESS_TOKEN&#39;
+export LOGGED_IN_SUBJECT=&#39;PASTE_SIGNED_IN_USERNAME&#39;
+export TOOL_NAME=&#39;list_available_courses&#39;
+export COURSE_ID=&#39;ALL&#39;
+
+jq -n --arg creator &quot;$ACTOR_CLIENT_ID&quot; --arg user &quot;$LOGGED_IN_SUBJECT&quot; \
+  --arg tool &quot;$TOOL_NAME&quot; --arg course &quot;$COURSE_ID&quot; \
+  &#39;[{type:&quot;urn:ibm:demo:verify:agent_action&quot;,courseId:$course,
+    operationDetails:{creator:$creator,affectedPerson:$user,loggedInSubject:$user,
+      action:$tool,targetSystem:&quot;course-mcp-server&quot;,resource:&quot;mcp-tool&quot;,
+      toolName:$tool,downstreamSystem:&quot;course-api&quot;}}]&#39; &gt; .local/tool-rar.json
+
+curl --silent --show-error --fail-with-body \
+  -X POST &quot;$TENANT/oauth2/token&quot; \
+  -H &#39;Content-Type: application/x-www-form-urlencoded&#39; \
+  --data-urlencode &#39;grant_type=urn:ietf:params:oauth:grant-type:token-exchange&#39; \
+  --data-urlencode &quot;client_id=$STS_CLIENT_ID&quot; \
+  --data-urlencode &quot;client_secret=$STS_CLIENT_SECRET&quot; \
+  --data-urlencode &quot;subject_token=$SUBJECT_ACCESS_TOKEN&quot; \
+  --data-urlencode &#39;subject_token_type=urn:ietf:params:oauth:token-type:access_token&#39; \
+  --data-urlencode &quot;actor_token=$ACTOR_ACCESS_TOKEN&quot; \
+  --data-urlencode &#39;actor_token_type=urn:ietf:params:oauth:token-type:access_token&#39; \
+  --data-urlencode &#39;audience=course-mcp-server&#39; \
+  --data-urlencode authorization_details@.local/tool-rar.json \
+  -o .local/delegated-token.json -w &#39;HTTP %{http_code}\n&#39;
+</code></pre>
+<p>Expected: <strong>200</strong>. Capture the delegated token:</p>
+<pre><code class="language-bash">export DELEGATED_ACCESS_TOKEN=&quot;$(jq -er &#39;.access_token | select(type == &quot;string&quot; and length &gt; 0)&#39; .local/delegated-token.json)&quot;
+</code></pre>
+<h2>8. Invoke the tool</h2>
+<p>Start the local application using setup Step 8 before calling:</p>
+<pre><code class="language-bash">jq -n --arg token &quot;$DELEGATED_ACCESS_TOKEN&quot; --arg user &quot;$LOGGED_IN_SUBJECT&quot; \
+  --arg tool &quot;$TOOL_NAME&quot; --arg course &quot;$COURSE_ID&quot; \
+  &#39;{tool_name:$tool,course_id:$course,requested_subject:$user,
+    logged_in_subject:$user,delegated_token:$token}&#39; &gt; .local/tool-invoke.json
+
+curl --silent --show-error --fail-with-body \
+  -X POST &#39;http://localhost:8000/mcp/invoke&#39; \
+  -H &#39;Content-Type: application/json&#39; \
+  --data-binary @.local/tool-invoke.json \
+  -o .local/tool-result.json -w &#39;HTTP %{http_code}\n&#39;
+jq . .local/tool-result.json
+</code></pre>
+<p>Expected: <strong>200</strong> and the course list. To enroll, set <code>TOOL_NAME=enroll_course</code> and <code>COURSE_ID</code> to a course from the catalog, then repeat Steps 7–8 to obtain authority for that operation. To view enrollments, use <code>TOOL_NAME=list_enrolled_courses</code> and <code>COURSE_ID=ALL</code>, then repeat Steps 7–8.</p>
+<p>Review <a href="audit.md">audit activity</a> to compare the read and enrollment token events. Keep token response and invocation files under <code>.local/</code> private.</p>
+<hr>
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>Run, verify and troubleshoot UC2</h1>
+<p><a href="../README.md">README</a> · <a href="setup.md">Setup</a> · <a href="setup-and-api-walkthrough.md">API clients</a></p>
+<h2>Before the demo</h2>
+<p>Complete setup Steps 1–8. Set <code>AGENT_ID</code> to the ID shown in the agent details. Restart the application and sign in again after configuration changes.</p>
+<pre><code class="language-bash">curl --show-error --fail http://localhost:8000/health
+curl --show-error --fail http://localhost:8000/mcp/tools
+python tools/diagnose_runtime.py
+</code></pre>
+<p>Tool discovery should include <code>list_available_courses</code>, <code>list_enrolled_courses</code>, <code>enroll_course</code> and <code>delete_course_history</code>. The last is an intentional missing-scope demonstration. The app starts the STDIO MCP subprocess; do not start a separate server for the default path.</p>
+<h2>Demo and evidence</h2>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Prompt / action</th>
+<th>Expected result and reason</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Read catalog</td>
+<td>“Show me the available courses.”</td>
+<td>Returns courses after delegation and MCP validation; requires read scope</td>
+</tr>
+<tr>
+<td>Enroll self</td>
+<td>“Enroll me in Advanced Security Operations.”</td>
+<td>Enrolls the signed-in user for the approved course; requires enroll scope</td>
+</tr>
+<tr>
+<td>Read enrollments</td>
+<td>“Show my enrolled courses.”</td>
+<td>Shows that user&#39;s enrollment result, including local persisted writes</td>
+</tr>
+<tr>
+<td>Cross-user</td>
+<td>Ask for an existing different user&#39;s enrollments</td>
+<td>Denied by the sample&#39;s self-service boundary; directory lookup alone does not grant authority</td>
+</tr>
+<tr>
+<td>Delete scope</td>
+<td>Use runtime collection requests 07 then 08</td>
+<td>Missing <code>course.delete</code> is denied at the resource when Token Exchange issued the test token</td>
+</tr>
+<tr>
+<td>Suspend / restore</td>
+<td>Setup request 07, read status, then fresh operation; restore with 06</td>
+<td>Record the fresh-request denial stage; after ACTIVE and fresh tokens, repeat the success</td>
+</tr>
+</tbody></table>
+<p>Use an actual course returned by the catalog. Diagnose lookup errors separately from authorization denial. Local enrollment writes persist in SQLite across MCP subprocesses; static example fixtures are separate demo data.</p>
+<h2>Debug by the first failed stage</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely area</th>
+<th>Fast check / recovery</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>dquote&gt;</code></td>
+<td>Shell quoting</td>
+<td>Ctrl+C; close the Authorization-header quote</td>
+</tr>
+<tr>
+<td>HTTP 301</td>
+<td>Tenant URL / redirect</td>
+<td>Use <code>https://</code> tenant origin; do not treat redirect as creation success</td>
+</tr>
+<tr>
+<td>Admin token length 0</td>
+<td>Failed request or export</td>
+<td>Reacquire admin token with exact HTTP 200 before extracting it</td>
+</tr>
+<tr>
+<td>HTTP 401 at token endpoint</td>
+<td>Client authentication</td>
+<td>Verify correct administrative/actor/Token Exchange client ID and secret for that request</td>
+</tr>
+<tr>
+<td>Generic HTML 400 / Authorization Error</td>
+<td>Front-end authorization or request handling</td>
+<td>Check nonempty bearer token and HTTPS; inspect response body, not headers alone</td>
+</tr>
+<tr>
+<td>PATCH HTTP 403, <code>CSIAK4300E</code></td>
+<td>Administrative entitlement</td>
+<td>Add <code>manageAppAccessAdmin</code> to the API client, obtain fresh admin token, retry</td>
+</tr>
+<tr>
+<td>PATCH HTTP 204, empty body</td>
+<td>Expected association success</td>
+<td>Verify association in console; do not parse empty body as JSON</td>
+</tr>
+<tr>
+<td><code>CSIAQ5201E</code></td>
+<td>Verify delegation</td>
+<td>Compare actor <code>sub</code> with subject <code>may_act.sub</code>; check Actor Criteria, default validation and permitted subject applications</td>
+</tr>
+<tr>
+<td><code>Invalid actor. Expected ...</code></td>
+<td>Local resource check</td>
+<td>Set <code>.env</code> <code>AGENT_ID</code>; confirm new gateway code and process; compare delegated <code>act.sub</code></td>
+</tr>
+<tr>
+<td><code>AGENT_ID is not configured</code></td>
+<td>Local <code>.env</code></td>
+<td>Fill registry ID; shell exports can override <code>.env</code>; restart</td>
+</tr>
+<tr>
+<td><code>invalid_authorization_details</code></td>
+<td>ADT schema / attached type</td>
+<td>Compare actual RAR with exact packaged schema, including MCP fields</td>
+</tr>
+<tr>
+<td>Audience / scope denial</td>
+<td>Token Exchange mapping or resource configuration</td>
+<td>Inspect delegated <code>aud</code>, scope and approved operation; do not broaden scopes to bypass the check</td>
+</tr>
+<tr>
+<td>Tool/action/course mismatch</td>
+<td>Token reused for another operation</td>
+<td>Obtain new delegated authority for the exact tool and course</td>
+</tr>
+<tr>
+<td>Introspection 401/403</td>
+<td>Introspection client permission</td>
+<td>Use a client authorized to inspect that token; do not infer token contents from failure</td>
+</tr>
+<tr>
+<td>Old error after editing</td>
+<td>Running old checkout/process</td>
+<td>Stop uvicorn, start <code>python -m uvicorn</code> in this project, sign in again</td>
+</tr>
+</tbody></table>
+<p>Run <code>python tools/diagnose_runtime.py</code> to print non-secret effective configuration and selected actor-introspection fields. It uses your existing <code>.env</code>, requests a fresh actor token and introspects with Token Exchange credentials. If that client lacks introspection permission, use the API collection with authorized resource credentials. Share selected claims and error codes; do not share tokens, secrets or cookies.</p>
+<p>For a remaining delegation error, also provide: Actor Criteria expression, Skip default actor validation state, permitted subject application list, and subject may_act mapping. The script&#39;s fresh token is not evidence of the browser session&#39;s older subject token.</p>
+<h2>Review audit activity</h2>
+<p>Follow <a href="audit.md">Audit course listing and enrollment</a> to identify the agent, user, requested tool and granted permissions in Verify token events.</p>
+<h2>Working boundaries</h2>
+<p>The normal path is local STDIO with <code>MCP_FORWARD_TO_COURSE_API=false</code>. Delegated output must be JWT for local signature/JWKS validation; opaque human access tokens are supported as Token Exchange inputs. Offline JWT validation does not automatically revoke every previously issued token on suspension.</p>
+<p>Keep <code>ALLOW_LOCAL_UNSIGNED_JWT=false</code>. The optional LLM classifies intent but does not grant authority. For a first run use <code>USE_LLM=false</code>; enable Gemini after the Verify/MCP path succeeds. Existing working LLM settings can be retained.</p>
+<hr>
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>Audit course listing and enrollment</h1>
+<p><a href="setup.md">Setup</a> · <a href="runtime-and-troubleshooting.md">Runtime demonstration</a></p>
+<h2>What the audit shows</h2>
+<p>IBM Verify token events record which agent authenticated and which user, tool and permissions were included when delegated access was issued. Use these records alongside the MCP operation result to trace a request.</p>
+<p>The examples below are based on four events captured for course listing and enrollment. All four record <code>result=success</code> and <code>action=issued</code>. Identity values in the downloadable examples use placeholders; tenant details, IP addresses, geolocation, user IDs and token hashes are omitted. Event IDs, times and transaction links are retained for comparison.</p>
+<h2>Find the events</h2>
+<ol>
+<li>Open <strong>Reporting &amp; diagnostics → Reports</strong> in the Verify administration console.</li>
+<li>Choose the time window of your demonstration and locate <strong>Token</strong> events. Depending on the tenant view, also inspect application/client authentication or AI activity reports.</li>
+<li>Filter or search for <strong>UC2 Course MCP Conversational Agent</strong> to find agent authentication.</li>
+<li>Search for <strong>UC2 Course MCP Agent Token Exchange</strong> to find delegated-token issuance.</li>
+<li>Open the event details or export JSON. Inspect the fields below; use the sample&#39;s response and MCP logs to confirm the tool result.</li>
+</ol>
+<p>Report labels may vary by tenant. The field names below are taken from the supplied event exports.</p>
+<h2>Example sequence</h2>
+<p>Times are on <strong>22 October 2026, Asia/Singapore (UTC+08:00)</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Event ID prefix</th>
+<th>Time</th>
+<th>Operation</th>
+<th>Course</th>
+<th>Scope</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>12aa8218…</code></td>
+<td>22:44:09.414</td>
+<td><code>Agent authentication</code></td>
+<td><code>—</code></td>
+<td><code>agent.run</code></td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>dd2dc3e0…</code></td>
+<td>22:44:09.803</td>
+<td><code>list_available_courses</code></td>
+<td><code>ALL</code></td>
+<td><code>mcp.tools.invoke course.read</code></td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>5effb8b3…</code></td>
+<td>22:45:56.846</td>
+<td><code>list_available_courses</code></td>
+<td><code>ALL</code></td>
+<td><code>mcp.tools.invoke course.read</code></td>
+<td>success</td>
+</tr>
+<tr>
+<td><code>173c2cc4…</code></td>
+<td>22:46:11.170</td>
+<td><code>enroll_course</code></td>
+<td><code>GOV-301</code></td>
+<td><code>mcp.tools.invoke course.enroll</code></td>
+<td>success</td>
+</tr>
+</tbody></table>
+<p>Two list events are present. They share the user session transaction but have different <code>actor_txn</code> and correlation IDs, so treat them as separate token-issuance events.</p>
+<h2>Agent authentication</h2>
+<p>Open <a href="audit-examples/actor-token.json">actor-token.json</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example value / meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>grant_type</code></td>
+<td><code>client_credentials</code></td>
+</tr>
+<tr>
+<td><code>applicationname</code></td>
+<td><code>UC2 Course MCP Conversational Agent</code></td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td><code>agent.run</code></td>
+</tr>
+<tr>
+<td><code>entity_type</code></td>
+<td><code>agent</code></td>
+</tr>
+<tr>
+<td><code>entity_id</code></td>
+<td>AgentID of the registered agent</td>
+</tr>
+<tr>
+<td><code>client_id</code></td>
+<td>OAuth client ID of its runtime application</td>
+</tr>
+<tr>
+<td><code>txn</code></td>
+<td>Transaction used to link this authentication to a later exchange</td>
+</tr>
+</tbody></table>
+<p>This event establishes that the runtime application authenticated as the registered agent. It does not by itself establish that a course tool ran.</p>
+<h2>List available courses</h2>
+<p>Open <a href="audit-examples/list-courses.json">list-courses.json</a> and the second <a href="audit-examples/list-courses-repeat.json">list-courses-repeat.json</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Observed value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>grant_type</code></td>
+<td><code>urn:ietf:params:oauth:grant-type:token-exchange</code></td>
+</tr>
+<tr>
+<td><code>applicationname</code></td>
+<td><code>UC2 Course MCP Agent Token Exchange</code></td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>The signed-in user (<code>demo-user</code> in the sanitized example)</td>
+</tr>
+<tr>
+<td><code>actor_entity_type</code></td>
+<td><code>agent</code></td>
+</tr>
+<tr>
+<td><code>actor_entity_id</code></td>
+<td>Registered AgentID</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td><code>mcp.tools.invoke course.read</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].courseId</code></td>
+<td><code>ALL</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.action</code></td>
+<td><code>list_available_courses</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.toolName</code></td>
+<td><code>list_available_courses</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.targetSystem</code></td>
+<td><code>course-mcp-server</code></td>
+</tr>
+</tbody></table>
+<p>The event contains both <code>requested_auth_details</code> and <code>auth_details</code>. Their parsed contents match for these captured requests: the requested list operation appears in the issued authorization context.</p>
+<h2>Enroll in a course</h2>
+<p>Open <a href="audit-examples/enroll-course.json">enroll-course.json</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Observed value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>applicationname</code></td>
+<td><code>UC2 Course MCP Agent Token Exchange</code></td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>The same signed-in user</td>
+</tr>
+<tr>
+<td><code>actor_entity_id</code></td>
+<td>The same registered AgentID</td>
+</tr>
+<tr>
+<td><code>scope</code></td>
+<td><code>mcp.tools.invoke course.enroll</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].courseId</code></td>
+<td><code>GOV-301</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.action</code></td>
+<td><code>enroll_course</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.toolName</code></td>
+<td><code>enroll_course</code></td>
+</tr>
+<tr>
+<td><code>auth_details[0].operationDetails.affectedPerson</code></td>
+<td>The intended user</td>
+</tr>
+</tbody></table>
+<p>The enrollment event identifies a specific course and carries enrollment permission. Compare this with the list event&#39;s <code>ALL</code> course selection and read permission. Requested and issued authorization details also match in this enrollment example.</p>
+<h2>Link authentication to delegated activity</h2>
+<p>The first list event provides a direct transaction link to the supplied agent-authentication event:</p>
+<pre><code class="language-text">List event data.actor_txn:
+f871fa67-90b6-4aae-bdd2-4387c4c3b3f6
+
+Agent authentication data.txn:
+f871fa67-90b6-4aae-bdd2-4387c4c3b3f6
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>How to use it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>actor_txn</code></td>
+<td>Find the agent-authentication event whose <code>txn</code> matches it</td>
+</tr>
+<tr>
+<td><code>subject_txn</code></td>
+<td>Find the associated subject-token transaction when its event is available</td>
+</tr>
+<tr>
+<td><code>actor_entity_id</code> / <code>entity_id</code></td>
+<td>Identify the registered agent across the supplied events</td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>Identify the human in the exchange event</td>
+</tr>
+<tr>
+<td><code>correlationid</code></td>
+<td>Investigate that event&#39;s request; each supplied event has a different value</td>
+</tr>
+<tr>
+<td><code>auth_details</code></td>
+<td>Inspect the authorized tool, course and target system</td>
+</tr>
+</tbody></table>
+<p>All three exchange events have <code>subject_txn=23e0f2be-ba9d-47f4-9974-50f8b5ec6e2a</code>. This groups them under the same subject transaction, not a single tool invocation. The matching subject-authentication event is not included in these four exports. The additional actor-authentication events referenced by the repeated list and enrollment events are also outside this set.</p>
+<h2>Read the authorization details</h2>
+<p>In these exports, <code>actor</code>, <code>requested_auth_details</code> and <code>auth_details</code> are JSON stored as strings. For example:</p>
+<pre><code class="language-bash">jq &#39;._source.data | {
+  applicationname, username, scope, actor_entity_id,
+  actor: (.actor | fromjson),
+  requested: (.requested_auth_details | fromjson),
+  authorized: (.auth_details | fromjson)
+}&#39; docs/audit-examples/enroll-course.json
+</code></pre>
+<h2>Confirm the business result</h2>
+<p>Token events establish successful issuance of delegated authority. Confirm successful listing or enrollment using the returned application result, MCP validation diagnostics and the enrolled-course query. The token events alone do not prove that enrollment completed.</p>
+<hr>
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>Execute setup and diagnostics in Postman or Insomnia</h1>
+<p><a href="../README.md">README</a> · <a href="setup.md">Setup and explanations</a> · <a href="collection-coverage.md">Collection coverage</a></p>
+<p>Begin with <a href="setup.md">Setup</a> for the complete first-time configuration. Use this guide when choosing Postman or Insomnia for the API steps.</p>
+<h2>Choose one client and import the current files</h2>
+<table>
+<thead>
+<tr>
+<th>Client</th>
+<th>Setup import</th>
+<th>Runtime import</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Postman</td>
+<td><code>api-clients/postman/uc2-ibm-verify-setup.postman_collection.json</code></td>
+<td><code>api-clients/postman/uc2-runtime-diagnostics.postman_collection.json</code></td>
+</tr>
+<tr>
+<td>Insomnia</td>
+<td><code>api-clients/insomnia/uc2-ibm-verify-setup.insomnia.json</code></td>
+<td><code>api-clients/insomnia/uc2-runtime-diagnostics.insomnia.json</code></td>
+</tr>
+</tbody></table>
+<p>Import the setup collection and the runtime collection for your chosen client. Do not run the entire collection: suspension and delete-scope denial are intentional negative tests, and ADT creation is optional when the type already exists.</p>
+<p>Postman stores successful response values in <strong>collection variables</strong>. Remove conflicting environment variables with the same names. Insomnia uses the imported <strong>Base Environment</strong>: copy returned values there manually. Setup and runtime environments are independent; copy the required values into the runtime environment explicitly. Neither client populates the application&#39;s local <code>.env</code>. The local <code>STS_*</code> keys hold the Token Exchange application settings; keep these key names when copying values.</p>
+<h2>Variable map</h2>
+<table>
+<thead>
+<tr>
+<th>Variable in either client</th>
+<th>Source and purpose</th>
+<th>Local <code>.env</code> equivalent</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>tenant_url</code></td>
+<td>HTTPS tenant origin; no trailing slash</td>
+<td>Tenant endpoint URLs</td>
+</tr>
+<tr>
+<td><code>admin_client_id</code>, <code>admin_client_secret</code></td>
+<td>Administrative API client with setup entitlements</td>
+<td>Setup only</td>
+</tr>
+<tr>
+<td><code>admin_access_token</code></td>
+<td>Setup request 01 <code>access_token</code></td>
+<td>Setup only</td>
+</tr>
+<tr>
+<td><code>agent_id</code></td>
+<td>Setup request 02 registry <code>id</code></td>
+<td><code>AGENT_ID</code></td>
+</tr>
+<tr>
+<td><code>actor_client_id</code>, <code>actor_client_secret</code></td>
+<td>Setup request 03 OAuth credentials</td>
+<td><code>ACTOR_CLIENT_ID</code>, <code>ACTOR_CLIENT_SECRET</code></td>
+</tr>
+<tr>
+<td><code>actor_application_id</code></td>
+<td>Runtime application&#39;s management ID from console</td>
+<td>Setup only</td>
+</tr>
+<tr>
+<td><code>actor_access_token</code></td>
+<td>Setup request 08 <code>access_token</code></td>
+<td>Transient runtime input</td>
+</tr>
+<tr>
+<td><code>resource_client_id</code>, <code>resource_client_secret</code></td>
+<td>Client authorized to introspect the selected token</td>
+<td>Diagnostics only</td>
+</tr>
+<tr>
+<td><code>subject_access_token</code></td>
+<td>Human access token obtained with Authorization Code + PKCE</td>
+<td>Transient runtime input</td>
+</tr>
+<tr>
+<td><code>subject_resource_client_id</code>, <code>subject_resource_client_secret</code></td>
+<td>Client permitted to introspect the human token</td>
+<td>Diagnostics only</td>
+</tr>
+<tr>
+<td><code>sts_client_id</code>, <code>sts_client_secret</code></td>
+<td>Token Exchange application credentials</td>
+<td><code>STS_CLIENT_ID</code>, <code>STS_CLIENT_SECRET</code></td>
+</tr>
+<tr>
+<td><code>delegated_access_token</code></td>
+<td>Runtime request 05 or 07 <code>access_token</code></td>
+<td>Transient tool-call authority</td>
+</tr>
+<tr>
+<td><code>logged_in_subject</code></td>
+<td>Actual human username/email/sub used by the sample</td>
+<td>Request context</td>
+</tr>
+<tr>
+<td><code>tool_name</code>, <code>course_id</code></td>
+<td>Intended operation; use <code>ALL</code> for listing</td>
+<td>Request context</td>
+</tr>
+</tbody></table>
+<p>Find <code>agent_id</code> in the agent details and <code>actor_application_id</code> in the application details or management URL. The setup guide shows where to obtain each value.</p>
+<h2>Setup sequence and expected outputs</h2>
+<p>Complete <a href="setup.md#step-1--prepare-administrative-access">setup Step 1</a>, including <code>manageAppAccessAdmin</code>, before running request 01.</p>
+<table>
+<thead>
+<tr>
+<th>Order</th>
+<th>Request</th>
+<th>Purpose</th>
+<th>Check / save</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>01 Get Admin Access Token</td>
+<td>Authorize setup calls</td>
+<td>HTTP 200; save <code>access_token</code> as <code>admin_access_token</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>02 Onboard Agent</td>
+<td>Create the governed record</td>
+<td>HTTP 201; save <code>id</code> as <code>agent_id</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>03 DCR Create UC2 Actor Client</td>
+<td>Create runtime credentials</td>
+<td>HTTP 201; save <code>client_id</code> and <code>client_secret</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>04 Get Agent Details</td>
+<td>Read only this agent</td>
+<td>HTTP 200; returned <code>id=agent_id</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>05 Associate Actor Application with Agent</td>
+<td>Link credentials to agent identity</td>
+<td>Set <code>actor_application_id</code> first; HTTP 204, no body</td>
+</tr>
+<tr>
+<td>6</td>
+<td>06 Activate Agent, then 04 again</td>
+<td>Establish lifecycle readiness</td>
+<td>ACTIVE and association verified in console</td>
+</tr>
+<tr>
+<td>7</td>
+<td>08 Get Actor Token</td>
+<td>Obtain fresh runtime identity</td>
+<td>HTTP 200; save <code>access_token</code> as <code>actor_access_token</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td>10 Introspect Actor Token</td>
+<td>Prove registry identity is in token</td>
+<td><code>active=true</code>, <code>sub=agent_id</code>, <code>client_id=actor_client_id</code></td>
+</tr>
+</tbody></table>
+<p>For request 10, supply introspection-authorized <code>resource_client_id</code>/secret. Your Token Exchange client can be used if your tenant permits it; a client credential pair is not automatically entitled to introspect every token. A 401/403 here is an introspection-access problem, not proof of an actor-sub mismatch.</p>
+<p>Request 05 replaces application tags with the supplied array. Preserve any additional tags for an existing customized application. If it returns 403, add <strong>Manage application lifecycle</strong> to the administrative API client, obtain a fresh admin token and retry. An empty 204 response is expected and must not be parsed as JSON.</p>
+<p><strong>Stop before runtime if request 10 does not show the registry AgentID in <code>sub</code>.</strong> Review application association, purpose tag, ACTIVE status and token freshness.</p>
+<h2>Shared console configuration</h2>
+<p>Follow setup Steps 4–6 in both client workflows:</p>
+<ol>
+<li><p>Create/configure the human OIDC application: Authorization Code + PKCE, browser callback and test-user entitlements.</p>
+</li>
+<li><p>Under the human application&#39;s <strong>Endpoint configuration → Introspect</strong>, configure target attribute <code>may_act</code> with a custom rule whose resulting JSON is:</p>
+<pre><code class="language-json">{&quot;sub&quot;: &quot;&lt;registry-agent-id&gt;&quot;}
+</code></pre>
+<p>Replace the placeholder with the AgentID returned by request 02 or shown in the agent details.</p>
+</li>
+<li><p>Register the ADT with request 09 only when absent. If UC1 already uses the same type, inspect/merge the MCP schema through the console instead of duplicating or breaking it.</p>
+</li>
+<li><p>Configure the Token Exchange application, JWT output, audience <code>course-mcp-server</code>, permitted scopes, ADT, consent mapping and test-user entitlements.</p>
+</li>
+<li><p>Keep <strong>Skip default actor validation unchecked</strong> for the supplied <code>may_act</code> path. If your tenant instead uses Actor Criteria, configure an explicit rule for the intended delegation and select the skip option only when deliberately replacing default validation. Do not enable unconditional delegation to bypass an error.</p>
+</li>
+</ol>
+<p>Also select <strong>All users are entitled to this application</strong> in the Token Exchange application&#39;s <strong>Entitlements</strong> tab. Then edit the agent&#39;s <strong>Agent tasks</strong>, select <strong>Act on behalf of a user</strong>, associate <strong>UC2 Course MCP Agent Token Exchange</strong>, and save. These console steps apply to both API clients.</p>
+<h2>Obtain the actual human access token for manual testing</h2>
+<p>The browser sample obtains the subject token through sign-in. For separate API-client tests, use your client&#39;s <strong>OAuth 2.0 Authorization Code + PKCE</strong> helper:</p>
+<ol>
+<li>Set authorize URL <code>&lt;tenant&gt;/oauth2/authorize</code>, token URL <code>&lt;tenant&gt;/oauth2/token</code>, human application&#39;s client ID/secret, scopes <code>openid profile email</code>, PKCE S256 and a fresh state.</li>
+<li>Read the helper&#39;s callback URL in your installed client and add that exact URL to the human application before authorizing. Keep <code>http://localhost:8000/callback</code> registered for browser use.</li>
+<li>Authenticate the intended human and obtain an <strong>access token</strong>. Do not substitute the ID token.</li>
+<li>Copy that access token to runtime <code>subject_access_token</code>. Populate <code>logged_in_subject</code> using the same actual human identity used by the app.</li>
+</ol>
+<p>After changing delegation configuration, obtain fresh tokens and sign in again. A separate API-client token does not prove which older token is held by an already running browser session.</p>
+<h2>Runtime sequence</h2>
+<p>Set runtime <code>agent_id</code>, <code>actor_client_id</code>, fresh <code>actor_access_token</code>, human <code>subject_access_token</code>, <code>sts_client_id</code>, <code>sts_client_secret</code>, <code>tenant_url</code> and <code>logged_in_subject</code>.</p>
+<ol>
+<li>Run <strong>01 Application Health</strong> and <strong>02 MCP tools/list through client</strong>. Expect four tools; discovery grants no execution rights.</li>
+<li>Run <strong>06 Introspect Subject Token and may_act</strong> with the subject introspection credentials. Expect <code>active=true</code> and <code>may_act.sub=agent_id</code> for this guide&#39;s delegation path.</li>
+<li>Set <code>tool_name=list_available_courses</code> and <code>course_id=ALL</code>. Run <strong>05 Token Exchange for Selected MCP Tool</strong>. Expect HTTP 200. Postman saves the returned token; in Insomnia copy <code>access_token</code> to <code>delegated_access_token</code>.</li>
+<li>Run <strong>04 Introspect Delegated Token as MCP Resource</strong> using authorized resource credentials. Expect <code>active=true</code>, <code>act.sub=agent_id</code>, the MCP audience, <code>mcp.tools.invoke course.read</code> and matching authorization details.</li>
+<li>Run <strong>03 MCP tools/call through client</strong>. Expect the approved operation to succeed.</li>
+<li>Repeat with <code>tool_name=enroll_course</code> and an actual <code>course_id</code>, such as <code>SEC-301</code>, obtaining a new delegated token for the changed operation. Then use <code>list_enrolled_courses</code> with <code>ALL</code> and a fresh read token.</li>
+</ol>
+<p>The supplied mapping derives delegated scopes from the requested operation. The request payload uses <code>actor_client_id</code> for <code>creator</code>.</p>
+<h2>Optional negative tests and recovery</h2>
+<ul>
+<li><strong>Missing delete authority:</strong> run runtime 07, then 08 using its new token. Expected resource denial is HTTP 403, <code>denied_stage=scope</code>, missing <code>course.delete</code>. The supplied mapping does not grant that scope. If Token Exchange denies issuance instead, record that earlier stage and do not claim a resource-scope test passed.</li>
+<li><strong>Cross-user request:</strong> use the browser test in the runtime guide. Named-user lookup requires <code>readUsers</code>; lookup success does not grant cross-user access.</li>
+<li><strong>Suspension:</strong> run setup 07 only after a working ACTIVE test, then setup 04 and a fresh runtime token request. Record the stage Verify denies. Reactivate with setup 06, verify with 04 and obtain fresh tokens. Previously issued JWTs may still pass offline validation until expiry.</li>
+</ul>
+<h2>API request reference</h2>
+<p>Open a request&#39;s description for its purpose and expected result. The <a href="collection-coverage.md">API request reference</a> lists every operation. Postman checks responses in the Tests tab; in Insomnia compare the response to the expected fields in the table.</p>
+<hr>
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<h1>API request reference</h1>
+<p><a href="setup.md">Setup</a> · <a href="setup-and-api-walkthrough.md">Postman and Insomnia walkthrough</a></p>
+<p>The same numbered requests are available in Postman and Insomnia. Each request description explains its purpose and expected response. Postman saves selected response values automatically; copy them into the Base Environment in Insomnia.</p>
+<table>
+<thead>
+<tr>
+<th>Collection</th>
+<th>Request</th>
+<th>Expected check</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Setup</td>
+<td>01 - Get Admin Access Token</td>
+<td>HTTP 200; copy access_token to admin_access_token. If 401, check this client ID/secret. After entitlement changes obtain a fresh token.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>02 - Onboard Agent</td>
+<td>HTTP 201; copy id to agent_id. Expected name: UC2 Course MCP Conversational Agent. Reuse an existing record instead of creating duplicates.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>03 - DCR - Create UC2 Actor Client</td>
+<td>HTTP 201; copy client_id and client_secret to actor_client_id and actor_client_secret. This client_id is not the AgentID.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>04 - Get Agent Details</td>
+<td>HTTP 200; id must equal agent_id. Repeat after activation/suspension. Verify application association in the console.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>05 - Associate Actor Application with Agent</td>
+<td>HTTP 204 with no body. actor_application_id is the application management ID. Requires manageAppAccessAdmin. Replaces tags: preserve other tags on customized applications. Verify association in Identity &amp; authentication.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>06 - Activate Agent</td>
+<td>HTTP 200; rerun 04 and confirm ACTIVE and association. Obtain a fresh actor token. Preserve customized metadata when adapting lifecycle PUT.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>07 - Suspend Agent</td>
+<td>HTTP 200; rerun 04. Record the actual denial stage in a new token request. Reactivate with 06. Previously issued JWTs may remain usable until expiry.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>08 - Get Actor Token</td>
+<td>HTTP 200; copy access_token to actor_access_token; run 10. actor sub must be the registry agent_id, not actor_client_id.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>09 - Register MCP ADT</td>
+<td>HTTP 201. If type exists, inspect/update via console; do not duplicate it or remove UC1 fields. See payloads/agent_action_adt_schema.json.</td>
+</tr>
+<tr>
+<td>Setup</td>
+<td>10 - Introspect Actor Token</td>
+<td>HTTP 200; active=true, sub=agent_id, client_id=actor_client_id. Use a client authorized to introspect this token (resource_client_id/secret; your Token Exchange client may be permitted). Configure subject may_act.sub=agent_id, keep human sub unchanged.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>01 - Application Health</td>
+<td>HTTP 200. If unavailable check localhost:8000 and the uvicorn terminal.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>02 - MCP tools/list through client</td>
+<td>HTTP 200; four tools including the intentional delete negative-test tool. Discovery grants no authority.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>03 - MCP tools/call through client</td>
+<td>HTTP 200 for an allowed matching request; verify business result. Use the token from 05 for the same tool/course/subject.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>04 - Introspect Delegated Token as MCP Resource</td>
+<td>HTTP 200; active=true; act.sub=agent_id; audience contains course-mcp-server; check scope and authorization_details.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>05 - Token Exchange for Selected MCP Tool</td>
+<td>HTTP 200; copy access_token to delegated_access_token. Match tool_name, course_id and logged_in_subject. RAR creator remains actor_client_id.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>06 - Introspect Subject Token and may_act</td>
+<td>HTTP 200; active=true; may_act.sub=agent_id for the supplied may_act route. The human own sub stays the human identity. If using Actor Criteria instead, inspect that explicit rule and Skip default actor validation.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>07 - Token Exchange for Delete - No Delete Scope</td>
+<td>HTTP 200 only if policy permits issuance; expected scope excludes course.delete. Copy returned access_token, then run 08. A policy denial at Token Exchange is a different observed stage.</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>08 - Invoke Delete - Expect Scope Denial</td>
+<td>HTTP 403 with denied_stage=scope and reason mentioning course.delete. No data should be deleted with the supplied mapping.</td>
+</tr>
+</tbody></table>
+<h2>Console configuration</h2>
+<p>Configure human sign-in, delegation, user entitlements and the Token Exchange consent mapping in the console as described in the setup guide. Under the agent&#39;s <strong>Agent tasks</strong>, associate the Token Exchange application with <strong>Act on behalf of a user</strong>.</p>
+<p>For Token Exchange requests, use the credentials saved as <code>STS_CLIENT_ID</code> and <code>STS_CLIENT_SECRET</code> in the application&#39;s <code>.env</code>.</p>
+</body></html>

@@ -1,0 +1,28 @@
+{
+  "_source": {
+    "id": "173c2cc4-ed72-4255-b0f6-69c5a4c49b42",
+    "time": 1792680371170,
+    "correlationid": "CORR_ID-AKa3864680-03a5-40ab-a01d-f3fd0af36938",
+    "event_type": "token",
+    "data": {
+      "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+      "result": "success",
+      "action": "issued",
+      "scope": "mcp.tools.invoke course.enroll",
+      "applicationname": "UC2 Course MCP Agent Token Exchange",
+      "applicationid": "<token-exchange-application-id>",
+      "client_id": "<token-exchange-client-id>",
+      "entity_id": "<agent-id>",
+      "entity_type": "agent",
+      "actor_entity_id": "<agent-id>",
+      "actor_entity_type": "agent",
+      "actor": "{\"sub\":\"<agent-id>\"}",
+      "username": "demo-user",
+      "requested_auth_details": "[{\"type\": \"urn:ibm:demo:verify:agent_action\", \"courseId\": \"GOV-301\", \"operationDetails\": {\"creator\": \"<runtime-client-id>\", \"affectedPerson\": \"demo-user\", \"loggedInSubject\": \"demo-user\", \"action\": \"enroll_course\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"enroll_course\", \"downstreamSystem\": \"course-api\"}}]",
+      "auth_details": "[{\"courseId\":\"GOV-301\",\"operationDetails\":{\"action\":\"enroll_course\",\"affectedPerson\":\"demo-user\",\"creator\":\"<runtime-client-id>\",\"downstreamSystem\":\"course-api\",\"loggedInSubject\":\"demo-user\",\"resource\":\"mcp-tool\",\"targetSystem\":\"course-mcp-server\",\"toolName\":\"enroll_course\"},\"type\":\"urn:ibm:demo:verify:agent_action\"}]",
+      "txn": "23e0f2be-ba9d-47f4-9974-50f8b5ec6e2a",
+      "subject_txn": "23e0f2be-ba9d-47f4-9974-50f8b5ec6e2a",
+      "actor_txn": "16a3ca3a-f2cd-4928-9b75-5f2f6967cc8e"
+    }
+  }
+}

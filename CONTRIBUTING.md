@@ -1,3 +1,9 @@
+<!--
+Copyright IBM Corp. All Rights Reserved.
+
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Contributing
 
 Review the following guidelines for submitting questions, issues, or changes to this repository. One of the most impactful changes would be examples and documentation.

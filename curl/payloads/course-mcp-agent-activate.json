@@ -1,0 +1,14 @@
+{
+  "schemas": [
+    "urn:ietf:params:scim:schemas:core:ibm:2.0:Agent"
+  ],
+  "displayName": "UC2 Course MCP Conversational Agent",
+  "description": "Conversational AI agent that invokes protected course tools",
+  "permissions": [],
+  "tags": [
+    "course-agent",
+    "mcp-tools",
+    "conversational-ai"
+  ],
+  "status": "ACTIVE"
+}

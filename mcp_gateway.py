@@ -7,9 +7,12 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import json
 import time
+import sys
+from enrollment_store import list_enrollments, enroll, delete_enrollments
 
 from config import settings
-from token_utils import decode_unverified
+from actor_validation import validate_actor
+from token_utils import verify_delegated_token, extract_authorization_details
 from course_api import (
     AVAILABLE_COURSES,
     ENROLLED_COURSES,
@@ -45,28 +48,41 @@ TOOL_DEFINITIONS = [
             "properties": {},
         },
     },
+    {
+        "name": "delete_course_history",
+        "description": "Delete locally recorded self-service enrollments; requires course.delete.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 
 ACTION_SCOPE_MAP = {
-    "list_available_courses": "mcp.tools.invoke",
-    "list_enrolled_courses": "mcp.tools.invoke",
-    "enroll_course": "mcp.tools.invoke",
+    "list_available_courses": {"mcp.tools.invoke", "course.read"},
+    "list_enrolled_courses": {"mcp.tools.invoke", "course.read"},
+    "enroll_course": {"mcp.tools.invoke", "course.enroll"},
+    "delete_course_history": {"mcp.tools.invoke", "course.delete"},
 }
+
+# delete_course_history is published for the scope-denial demonstration.
+# Verify grants mcp.tools.invoke only; the gateway requires course.delete too.
+
+
+def _stderr_print(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 
 def _mcp_log(title: str, data: Dict[str, Any] | None = None) -> None:
-    print("\n" + "=" * 20 + f" MCP: {title} " + "=" * 20)
-    print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"MCP Server Name: {settings.mcp_server_name}")
-    print(f"MCP Audience: {settings.mcp_audience}")
-    print(f"Downstream System: {settings.downstream_system}")
-    print(f"Forward To Course API: {settings.mcp_forward_to_course_api}")
+    _stderr_print("\n" + "=" * 20 + f" MCP: {title} " + "=" * 20)
+    _stderr_print(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    _stderr_print(f"MCP Server Name: {settings.mcp_server_name}")
+    _stderr_print(f"MCP Audience: {settings.mcp_audience}")
+    _stderr_print(f"Downstream System: {settings.downstream_system}")
+    _stderr_print(f"Forward To Course API: {settings.mcp_forward_to_course_api}")
 
     if data:
-        print(json.dumps(data, indent=2, default=str))
+        _stderr_print(json.dumps(data, indent=2, default=str))
 
-    print("=" * 60 + "\n")
+    _stderr_print("=" * 60 + "\n")
 
 
 def list_mcp_tools() -> Dict[str, Any]:
@@ -93,7 +109,7 @@ def list_mcp_tools() -> Dict[str, Any]:
 def _normalize_subject(subject: str) -> str:
     if not subject:
         return "unknown-user"
-    return subject.split("@")[0].lower()
+    return subject.strip().casefold()
 
 
 def _as_list(value):
@@ -137,7 +153,7 @@ def _deny(
 
 
 def _find_auth_detail(claims: Dict[str, Any]) -> Dict[str, Any] | None:
-    auth_details = claims.get("authorization_details") or []
+    auth_details = extract_authorization_details(claims)
 
     if isinstance(auth_details, dict):
         auth_details = [auth_details]
@@ -181,46 +197,30 @@ def _validate_mcp_invocation(
             ),
         }
 
-    act = claims.get("act")
+    actor_result = validate_actor(claims)
+    if not actor_result["valid"]:
+        return {**actor_result, "stage": "actor"}
 
-    if not act:
-        return {
-            "valid": False,
-            "stage": "actor",
-            "reason": "Missing actor claim 'act' in delegated token",
-        }
+    required_scopes = ACTION_SCOPE_MAP.get(tool_name)
 
-    actor_sub = None
-
-    if isinstance(act, dict):
-        actor_sub = act.get("sub") or act.get("client_id")
-
-    if settings.actor_client_id and actor_sub and actor_sub != settings.actor_client_id:
-        return {
-            "valid": False,
-            "stage": "actor",
-            "reason": (
-                f"Invalid actor. Expected '{settings.actor_client_id}', "
-                f"token act.sub={actor_sub}"
-            ),
-        }
-
-    required_scope = ACTION_SCOPE_MAP.get(tool_name)
-
-    if not required_scope:
+    if not required_scopes:
         return {
             "valid": False,
             "stage": "tool",
             "reason": f"Unsupported MCP tool: {tool_name}",
         }
 
-    scopes = _scope_list(claims)
+    scopes = set(_scope_list(claims))
+    missing_scopes = sorted(required_scopes - scopes)
 
-    if required_scope not in scopes:
+    if missing_scopes:
         return {
             "valid": False,
             "stage": "scope",
-            "reason": f"Missing required MCP scope: {required_scope}. Token scopes={scopes}",
+            "reason": (
+                f"Missing required scope(s) for {tool_name}: {missing_scopes}. "
+                f"Token scopes={sorted(scopes)}"
+            ),
         }
 
     auth_detail = _find_auth_detail(claims)
@@ -371,6 +371,20 @@ def _execute_tool_locally(
         },
     )
 
+    if tool_name == "delete_course_history":
+        removed = delete_enrollments(logged_in)
+        return {
+            "allowed": True,
+            "http_status": 200,
+            "operation": tool_name,
+            "mcp_tool": tool_name,
+            "executed_by": "mcp_gateway",
+            "execution_mode": "local_mcp_tool",
+            "deleted_enrollments": removed,
+            "message": "Deleted locally recorded enrollment history; sample fixture data is unchanged.",
+            "validation": validation,
+        }
+
     if tool_name == "list_available_courses":
         result = {
             "allowed": True,
@@ -396,7 +410,7 @@ def _execute_tool_locally(
         return result
 
     if tool_name == "list_enrolled_courses":
-        enrolled = ENROLLED_COURSES.get(logged_in, [])
+        enrolled = list_enrollments(logged_in, ENROLLED_COURSES.get(logged_in, ENROLLED_COURSES.get(logged_in.split("@")[0], [])))
 
         result = {
             "allowed": True,
@@ -440,19 +454,14 @@ def _execute_tool_locally(
                 stage="tool_input_validation",
             )
 
-        enrolled = ENROLLED_COURSES.setdefault(logged_in, [])
-
-        if not any(c.get("id") == course_id for c in enrolled):
-            enrolled.append(
-                {
-                    "id": course["id"],
-                    "title": course["title"],
-                    "status": "enrolled",
-                }
-            )
-            message = f"MCP tool enrolled user successfully in {course['id']} - {course['title']}"
-        else:
-            message = f"User is already enrolled in {course['id']} - {course['title']}"
+        fixtures = ENROLLED_COURSES.get(logged_in, ENROLLED_COURSES.get(logged_in.split("@")[0], []))
+        already_seeded = any(c.get("id") == course_id for c in fixtures)
+        created = False if already_seeded else enroll(logged_in, course)
+        enrolled = list_enrollments(logged_in, fixtures)
+        message = (
+            f"MCP tool enrolled user successfully in {course['id']} - {course['title']}"
+            if created else f"User is already enrolled in {course['id']} - {course['title']}"
+        )
 
         result = {
             "allowed": True,
@@ -520,7 +529,11 @@ def invoke_mcp_tool(
         },
     )
 
-    claims = decode_unverified(delegated_token)
+    try:
+        claims = verify_delegated_token(delegated_token)
+    except Exception as exc:
+        return _deny(f"Delegated token validation failed: {type(exc).__name__}",
+                     http_status=401, stage="token_validation")
 
     check = _validate_mcp_invocation(
         claims=claims,
@@ -536,7 +549,26 @@ def invoke_mcp_tool(
             stage=check.get("stage", "mcp_validation"),
         )
 
-    if settings.mcp_forward_to_course_api:
+    detail = check["authorization_detail"]
+    authorized_course = detail.get("courseId")
+    if (tool_name == "enroll_course" and authorized_course != course_id) or (
+        tool_name != "enroll_course" and authorized_course != "ALL"
+    ):
+        return _deny("Invoked course does not match authorized courseId", claims,
+                     stage="course_id")
+    operation = detail.get("operationDetails") or {}
+    token_identities = {
+        str(claims.get(key)).strip().casefold()
+        for key in ("sub", "preferred_username", "email") if claims.get(key)
+    }
+    if not token_identities or _normalize_subject(logged_in_subject) not in token_identities:
+        return _deny("Logged-in subject does not match delegated token identity", claims,
+                     stage="token_subject")
+    if operation.get("creator") != settings.actor_client_id:
+        return _deny("RAR creator does not match configured actor client", claims,
+                     stage="creator")
+
+    if settings.mcp_forward_to_course_api and tool_name != "delete_course_history":
         _mcp_log(
             "FORWARDING TO DOWNSTREAM COURSE API",
             {
