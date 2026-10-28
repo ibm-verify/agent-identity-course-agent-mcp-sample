@@ -1,5 +1,5 @@
 {
-  "type": "urn:ibm:demo:verify:agent_action",
+  "type": "urn:ibm:demo:verify:mcp_tool_action",
   "courseId": "SEC-301",
   "operationDetails": {
     "creator": "<actor-client-id>",

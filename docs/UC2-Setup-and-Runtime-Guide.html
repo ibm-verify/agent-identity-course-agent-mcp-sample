@@ -301,15 +301,15 @@ The access token is still sent to Token Exchange as:</p>
 <p><strong>If omitted or incorrect:</strong> A missing or incompatible type can reject <code>authorization_details</code> before tool execution.</p>
 <p><strong>Completion check:</strong> The registered schema accepts <code>courseId</code> and every <code>operationDetails</code> field built by this package.</p>
 <p>The sample uses:</p>
-<pre><code class="language-text">urn:ibm:demo:verify:agent_action
+<pre><code class="language-text">urn:ibm:demo:verify:mcp_tool_action
 </code></pre>
 <p>Use the exact schema in:</p>
-<pre><code class="language-text">payloads/agent_action_adt_schema.json
+<pre><code class="language-text">payloads/mcp_tool_action_adt_schema.json
 </code></pre>
 <p>The actual <code>rar_builder.py</code> payload is shaped like:</p>
 <pre><code class="language-json">[
   {
-    &quot;type&quot;: &quot;urn:ibm:demo:verify:agent_action&quot;,
+    &quot;type&quot;: &quot;urn:ibm:demo:verify:mcp_tool_action&quot;,
     &quot;courseId&quot;: &quot;SEC-301&quot;,
     &quot;operationDetails&quot;: {
       &quot;creator&quot;: &quot;&lt;actor-client-id&gt;&quot;,
@@ -339,9 +339,9 @@ setup_request 201 .local/adt-created.json \
   -X POST &quot;$TENANT/v1.0/auth-detail-types&quot; \
   -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
   -H &#39;Content-Type: application/json&#39; \
-  --data-binary @payloads/agent_action_adt_registration.json
+  --data-binary @payloads/mcp_tool_action_adt_registration.json
 </code></pre>
-<p>In Postman or Insomnia, run <strong>09 Register MCP ADT</strong> only if the type does not exist. If it exists, use <strong>Applications → Authorization detail types</strong>, open the type, and replace/merge its schema using <code>payloads/agent_action_adt_schema.json</code>. For a new type, click <strong>Create → Standard</strong>, enter the type name above, paste that schema and save. Consent-display text may use <code>{ad.courseId}</code>; display text does not enforce authorization.</p>
+<p>In Postman or Insomnia, run <strong>09 Register MCP ADT</strong> only if the type does not exist. If it exists, use <strong>Applications → Authorization detail types</strong>, open the type, and replace/merge its schema using <code>payloads/mcp_tool_action_adt_schema.json</code>. For a new type, click <strong>Create → Standard</strong>, enter the type name above, paste that schema and save. Consent-display text may use <code>{ad.courseId}</code>; display text does not enforce authorization.</p>
 <h3>Why <code>toolName</code> matters</h3>
 <p>The token-exchange request is created <strong>before</strong> the MCP tool call. The authorization detail says:</p>
 <pre><code class="language-text">toolName = enroll_course
@@ -528,7 +528,7 @@ DOWNSTREAM_SYSTEM=course-api
 MCP_FORWARD_TO_COURSE_API=false
 COURSE_API_AUDIENCE=course-api
 
-AGENT_ADT_TYPE=urn:ibm:demo:verify:agent_action
+AGENT_ADT_TYPE=urn:ibm:demo:verify:mcp_tool_action
 </code></pre>
 <p>For the first run:</p>
 <pre><code class="language-dotenv">USE_LLM=false
@@ -659,7 +659,7 @@ jq &#39;{id,displayName,status,oauthClients}&#39; .local/agent-current.json
   -X POST &quot;$TENANT/v1.0/auth-detail-types&quot; \
   -H &quot;Authorization: Bearer $ADMIN_ACCESS_TOKEN&quot; \
   -H &#39;Content-Type: application/json&#39; \
-  --data-binary @payloads/agent_action_adt_registration.json \
+  --data-binary @payloads/mcp_tool_action_adt_registration.json \
   -o .local/adt-created.json -w &#39;HTTP %{http_code}\n&#39;
 </code></pre>
 <p>Expected: <strong>201</strong>. If the type already exists, inspect and update its schema in the console as described in setup Step 5.</p>
@@ -693,7 +693,7 @@ export COURSE_ID=&#39;ALL&#39;
 
 jq -n --arg creator &quot;$ACTOR_CLIENT_ID&quot; --arg user &quot;$LOGGED_IN_SUBJECT&quot; \
   --arg tool &quot;$TOOL_NAME&quot; --arg course &quot;$COURSE_ID&quot; \
-  &#39;[{type:&quot;urn:ibm:demo:verify:agent_action&quot;,courseId:$course,
+  &#39;[{type:&quot;urn:ibm:demo:verify:mcp_tool_action&quot;,courseId:$course,
     operationDetails:{creator:$creator,affectedPerson:$user,loggedInSubject:$user,
       action:$tool,targetSystem:&quot;course-mcp-server&quot;,resource:&quot;mcp-tool&quot;,
       toolName:$tool,downstreamSystem:&quot;course-api&quot;}}]&#39; &gt; .local/tool-rar.json
@@ -1416,7 +1416,7 @@ SPDX-License-Identifier: Apache-2.0
 <tr>
 <td>Setup</td>
 <td>09 - Register MCP ADT</td>
-<td>HTTP 201. If type exists, inspect/update via console; do not duplicate it or remove UC1 fields. See payloads/agent_action_adt_schema.json.</td>
+<td>HTTP 201. If type exists, inspect/update via console; do not duplicate it or remove UC1 fields. See payloads/mcp_tool_action_adt_schema.json.</td>
 </tr>
 <tr>
 <td>Setup</td>

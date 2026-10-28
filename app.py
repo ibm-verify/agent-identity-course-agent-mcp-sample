@@ -361,7 +361,7 @@ async def chat(request: Request, message: str = Form(...)):
 
     authorization_details = [
         build_agent_authorization_details(
-            creator=settings.actor_client_id or "course-assistant-agent",
+            creator=settings.agent_id or settings.actor_client_id or "course-assistant-agent",
             affected_person=target_subject,
             action=action,
             target_system=settings.mcp_server_name,

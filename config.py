@@ -53,7 +53,7 @@ class Settings:
     verify_management_client_secret: str = os.getenv("VERIFY_MANAGEMENT_CLIENT_SECRET", "")
     verify_management_scopes: str = os.getenv("VERIFY_MANAGEMENT_SCOPES", "")
 
-    agent_adt_type: str = os.getenv("AGENT_ADT_TYPE", "urn:ibm:demo:verify:agent_action")
+    agent_adt_type: str = os.getenv("AGENT_ADT_TYPE", "urn:ibm:demo:verify:mcp_tool_action")
 
     mcp_audience: str = os.getenv("MCP_AUDIENCE", "course-mcp-server")
     mcp_server_name: str = os.getenv("MCP_SERVER_NAME", "course-mcp-server")
