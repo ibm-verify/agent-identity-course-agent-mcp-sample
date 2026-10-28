@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "type": {
-      "const": "urn:ibm:demo:verify:agent_action"
+      "const": "urn:ibm:demo:verify:mcp_tool_action"
     },
     "ticketId": {
       "type": "string"

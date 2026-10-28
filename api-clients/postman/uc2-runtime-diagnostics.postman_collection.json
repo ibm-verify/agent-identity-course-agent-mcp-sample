@@ -264,12 +264,12 @@
             },
             {
               "key": "authorization_details",
-              "value": "[{\"type\": \"urn:ibm:demo:verify:agent_action\", \"courseId\": \"{{course_id}}\", \"operationDetails\": {\"creator\": \"{{actor_client_id}}\", \"affectedPerson\": \"{{logged_in_subject}}\", \"loggedInSubject\": \"{{logged_in_subject}}\", \"action\": \"{{tool_name}}\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"{{tool_name}}\", \"downstreamSystem\": \"course-api\"}}]",
+              "value": "[{\"type\": \"urn:ibm:demo:verify:mcp_tool_action\", \"courseId\": \"{{course_id}}\", \"operationDetails\": {\"creator\": \"{{agent_id}}\", \"affectedPerson\": \"{{logged_in_subject}}\", \"loggedInSubject\": \"{{logged_in_subject}}\", \"action\": \"{{tool_name}}\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"{{tool_name}}\", \"downstreamSystem\": \"course-api\"}}]",
               "type": "text"
             }
           ]
         },
-        "description": "Purpose: Exchange a human access token and fresh actor token for the selected tool.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to delegated_access_token. Match tool_name, course_id and logged_in_subject. RAR creator remains actor_client_id.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples."
+        "description": "Purpose: Exchange a human access token and fresh actor token for the selected tool.\n\nBefore running: follow docs/setup-and-api-walkthrough.md; configure IDs and credentials in this collection/environment.\n\nExpected / next action: HTTP 200; copy access_token to delegated_access_token. Match tool_name, course_id and logged_in_subject. RAR creator must equal agent_id.\n\nSetup: in the Token Exchange application select All users are entitled to this application for the tutorial. In the agent\u2019s Agent tasks select Act on behalf of a user, associate UC2 Course MCP Agent Token Exchange, and save. See docs/audit.md for list/enrollment audit examples."
       },
       "event": [
         {
@@ -411,7 +411,7 @@
             },
             {
               "key": "authorization_details",
-              "value": "[{\"type\": \"urn:ibm:demo:verify:agent_action\", \"courseId\": \"ALL\", \"operationDetails\": {\"creator\": \"{{actor_client_id}}\", \"affectedPerson\": \"{{logged_in_subject}}\", \"loggedInSubject\": \"{{logged_in_subject}}\", \"action\": \"delete_course_history\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"delete_course_history\", \"downstreamSystem\": \"course-api\"}}]",
+              "value": "[{\"type\": \"urn:ibm:demo:verify:mcp_tool_action\", \"courseId\": \"ALL\", \"operationDetails\": {\"creator\": \"{{agent_id}}\", \"affectedPerson\": \"{{logged_in_subject}}\", \"loggedInSubject\": \"{{logged_in_subject}}\", \"action\": \"delete_course_history\", \"targetSystem\": \"course-mcp-server\", \"resource\": \"mcp-tool\", \"toolName\": \"delete_course_history\", \"downstreamSystem\": \"course-api\"}}]",
               "type": "text"
             }
           ]

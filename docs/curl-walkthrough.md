@@ -123,7 +123,7 @@ curl --silent --show-error --fail-with-body \
   -X POST "$TENANT/v1.0/auth-detail-types" \
   -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  --data-binary @payloads/agent_action_adt_registration.json \
+  --data-binary @payloads/mcp_tool_action_adt_registration.json \
   -o .local/adt-created.json -w 'HTTP %{http_code}\n'
 ```
 
@@ -169,9 +169,9 @@ export LOGGED_IN_SUBJECT='PASTE_SIGNED_IN_USERNAME'
 export TOOL_NAME='list_available_courses'
 export COURSE_ID='ALL'
 
-jq -n --arg creator "$ACTOR_CLIENT_ID" --arg user "$LOGGED_IN_SUBJECT" \
+jq -n --arg creator "$AGENT_ID" --arg user "$LOGGED_IN_SUBJECT" \
   --arg tool "$TOOL_NAME" --arg course "$COURSE_ID" \
-  '[{type:"urn:ibm:demo:verify:agent_action",courseId:$course,
+  '[{type:"urn:ibm:demo:verify:mcp_tool_action",courseId:$course,
     operationDetails:{creator:$creator,affectedPerson:$user,loggedInSubject:$user,
       action:$tool,targetSystem:"course-mcp-server",resource:"mcp-tool",
       toolName:$tool,downstreamSystem:"course-api"}}]' > .local/tool-rar.json

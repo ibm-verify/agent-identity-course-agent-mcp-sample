@@ -564,9 +564,14 @@ def invoke_mcp_tool(
     if not token_identities or _normalize_subject(logged_in_subject) not in token_identities:
         return _deny("Logged-in subject does not match delegated token identity", claims,
                      stage="token_subject")
-    if operation.get("creator") != settings.actor_client_id:
-        return _deny("RAR creator does not match configured actor client", claims,
-                     stage="creator")
+    expected_creator = settings.agent_id or settings.actor_client_id or "course-assistant-agent"
+
+    if operation.get("creator") != expected_creator:
+        return _deny(
+            "RAR creator does not match configured agent identity",
+            claims,
+            stage="creator"
+        )
 
     if settings.mcp_forward_to_course_api and tool_name != "delete_course_history":
         _mcp_log(

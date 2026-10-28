@@ -37,11 +37,11 @@ Create an administrative API client in **Security → API access** (navigation l
 | Entitlement | API entitlement | Required for |
 |---|---|---|
 | Configure AI agents | `writeAgents` | Create/update the registry record |
-| Manage AI agents | `manageAgentStatus` | Activate/suspend the agent |
+| Review and manage AI agent status | `manageAgentStatus` | Activate/suspend the agent |
 | Manage OIDC client registration dynamically | `manageOidcDynamicClient` | Register the runtime OAuth client |
 | Manage application lifecycle | `manageAppAccessAdmin` | Associate the runtime application through PATCH |
 | Manage authorization detail types | `manageAuthDetailTypes` | Register the ADT if it does not exist |
-| Read Users | `readUsers` | Optional named-user directory lookup |
+| Read all users but not group memberships | `readUsers` | Optional named-user directory lookup |
 
 After adding entitlements, obtain a **new** administrative token. An existing token does not automatically gain the new permissions.
 
@@ -178,29 +178,32 @@ setup_request 200 .local/agent-current.json \
 
 ## Step 4 — Configure the human subject application
 
-**Why:** Establish which human has signed in and which registered agent may use that human’s delegated authority.
+**Why**: The human subject application authenticates the user who interacts with the Course Agent. han relying on an application previously created for UC1.
 
-**If omitted or incorrect:** Without sign-in entitlements the human cannot access the app. Without a matching delegation relationship Token Exchange can fail with `CSIAQ5201E`.
+4.1 Create the UC2 subject application
 
-**Completion check:** the test user can sign in and the delegation mapping contains the AgentID recorded in Step 2.
+1. Sign in to the IBM Verify administration console.
+2. Navigate to Applications.
+3. Select **Add application**.
+4. Choose OpenID Connect (OIDC).
 
-Create the OIDC application used by the browser chat.
+Create the application using the following configuration.
 
 | Setting | Sample value |
 |---|---|
+| Application name | **Course MCP Subject Application** |
 | Grant | Authorization Code |
+| Application URL | http://localhost:8000/ |
 | PKCE | S256 / required |
 | Redirect URI | `http://localhost:8000/callback` |
-| OIDC scopes | `openid profile email` |
+| OIDC scopes,Add under Custom scopes and API access | `openid profile email` |
 | Subject access-token format | **Default (opaque) is supported; JWT is optional** |
-| ID token | Required; used to establish the logged-in human user |
 
 Capture:
-
 ```text
 SUBJECT_CLIENT_ID=<subject client ID>
 SUBJECT_CLIENT_SECRET=<subject client secret>
-```
+``` 
 
 ### Human identity comes from the ID token
 
@@ -226,7 +229,6 @@ subject_token_type=urn:ietf:params:oauth:token-type:access_token
 ```
 
 `verify_oauth.py` sends an OIDC `nonce` on the authorization request. `app.py` validates the returned `id_token` through `verify_id_token()` and stores only the access token plus validated ID-token claims in the browser session.
-
 
 
 ### Allow the agent to act for the user
@@ -275,7 +277,7 @@ This mapping allows the selected agent to act on behalf of the signed-in user.
 
 After completing the Sign-on configuration, configure who is allowed to access the application.
 
-1. Open the **Entitlements** tab for `UC2_subject_token`.
+1. Open the **Entitlements** tab for `Course MCP Subject Application `.
 2. Select:
 
    **All users are entitled to this application**
@@ -309,13 +311,13 @@ Keep **Skip default actor validation** disabled on the Token Exchange client for
 The sample uses:
 
 ```text
-urn:ibm:demo:verify:agent_action
+urn:ibm:demo:verify:mcp_tool_action
 ```
 
 Use the exact schema in:
 
 ```text
-payloads/agent_action_adt_schema.json
+payloads/mcp_tool_action_adt_schema.json
 ```
 
 The actual `rar_builder.py` payload is shaped like:
@@ -323,10 +325,10 @@ The actual `rar_builder.py` payload is shaped like:
 ```json
 [
   {
-    "type": "urn:ibm:demo:verify:agent_action",
+    "type": "urn:ibm:demo:verify:mcp_tool_action",
     "courseId": "SEC-301",
     "operationDetails": {
-      "creator": "<actor-client-id>",
+      "creator": "<registry-agent-id>",
       "affectedPerson": "<target-subject>",
       "loggedInSubject": "<signed-in-subject>",
       "action": "enroll_course",
@@ -341,6 +343,11 @@ The actual `rar_builder.py` payload is shaped like:
 
 The schema included with this package matches these fields exactly.
 
+**Agent identity:** `operationDetails.creator` is the permanent Verify Agent Registry `AGENT_ID`, not the OAuth `ACTOR_CLIENT_ID`. The delegated JWT must have `act.sub=AGENT_ID`. The runtime OAuth client ID continues to be used for client authentication.
+
+**UC1/UC2 independence:** UC1 uses `urn:ibm:demo:verify:agent_action`; UC2 uses `urn:ibm:demo:verify:mcp_tool_action`. Register and authorize the UC2 type independently. Changing the runtime string does not register it in Verify or automatically grant entitlement/policy approval.
+
+
 For this version, the ADT action and `toolName` enums contain four recognized intents:
 
 ```text
@@ -354,7 +361,7 @@ delete_course_history
 
 ### Register the ADT with cURL, Postman, Insomnia, or UI
 
-Use UC2's schema, which includes `toolName`, `targetSystem=course-mcp-server`, `resource=mcp-tool`, and `downstreamSystem`. If UC1 already registered the same type name in this tenant, inspect its schema and update it to support these MCP fields before running UC2. Do not blindly create a duplicate or remove fields needed by UC1.
+Use UC2's schema, which includes `toolName`, `targetSystem=course-mcp-server`, `resource=mcp-tool`, and `downstreamSystem`. UC2 deliberately uses a distinct type from UC1 (`urn:ibm:demo:verify:agent_action`). Do not rename, delete, or modify the UC1 type. If the UC2 MCP type already exists, inspect its schema and update it only if required; avoid duplicate registration.
 
 ```bash
 # Use 201 for the documented ADT creation response; inspect an unexpected status.
@@ -362,10 +369,10 @@ setup_request 201 .local/adt-created.json \
   -X POST "$TENANT/v1.0/auth-detail-types" \
   -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" \
   -H 'Content-Type: application/json' \
-  --data-binary @payloads/agent_action_adt_registration.json
+  --data-binary @payloads/mcp_tool_action_adt_registration.json
 ```
 
-In Postman or Insomnia, run **09 Register MCP ADT** only if the type does not exist. If it exists, use **Applications → Authorization detail types**, open the type, and replace/merge its schema using `payloads/agent_action_adt_schema.json`. For a new type, click **Create → Standard**, enter the type name above, paste that schema and save. Consent-display text may use `{ad.courseId}`; display text does not enforce authorization.
+In Postman or Insomnia, run **09 Register MCP ADT** only if the type does not exist.
 
 ### Why `toolName` matters
 
@@ -578,8 +585,10 @@ DOWNSTREAM_SYSTEM=course-api
 MCP_FORWARD_TO_COURSE_API=false
 COURSE_API_AUDIENCE=course-api
 
-AGENT_ADT_TYPE=urn:ibm:demo:verify:agent_action
+AGENT_ADT_TYPE=urn:ibm:demo:verify:mcp_tool_action
 ```
+
+Confirm the Token Exchange application and its associated authorization, scope mapping, and policy are configured for the UC2 MCP ADT. Verify the registration before testing; an unknown ADT can cause a Token Exchange rejection.
 
 For the first run:
 
