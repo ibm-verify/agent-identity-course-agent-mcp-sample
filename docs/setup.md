@@ -178,7 +178,7 @@ setup_request 200 .local/agent-current.json \
 
 ## Step 4 — Configure the human subject application
 
-**Why**: The human subject application authenticates the user who interacts with the Course Agent. han relying on an application previously created for UC1.
+**Why**: The human subject application authenticates the user who interacts with the UC2 Course MCP Conversational Agent.
 
 4.1 Create the UC2 subject application
 
@@ -191,7 +191,7 @@ Create the application using the following configuration.
 
 | Setting | Sample value |
 |---|---|
-| Application name | **Course MCP Subject Application** |
+| Application name | **UC2 Course MCP Subject Application** |
 | Grant | Authorization Code |
 | Application URL | http://localhost:8000/ |
 | PKCE | S256 / required |
@@ -277,14 +277,15 @@ This mapping allows the selected agent to act on behalf of the signed-in user.
 
 After completing the Sign-on configuration, configure who is allowed to access the application.
 
-1. Open the **Entitlements** tab for `Course MCP Subject Application `.
+1. Open the **Entitlements** tab for `UC2 Course MCP Subject Application `.
 2. Select:
 
    **All users are entitled to this application**
 
 3. Save the configuration.
 
-This tutorial uses **All users are entitled to this application** so that the test human user can sign in to the Course MCP Agent Application without requiring an additional user or group assignment.
+This tutorial uses **All users are entitled to this application** so that the test human user can sign in to **UC2 Course MCP Subject Application** without requiring an additional user or group assignment.
+
 
 > **Why is this required?**  
 
@@ -297,8 +298,13 @@ This tutorial uses **All users are entitled to this application** so that the te
 > For this tutorial, allowing all users keeps the setup simple. In a production deployment, access should normally be restricted to the users or groups that are authorized to use the application.
 
 
+Leave **Skip default actor validation** disabled.
 
-Keep **Skip default actor validation** disabled on the Token Exchange client for this `may_act` setup. Actor Criteria is an alternative configuration, not an additional requirement: if your tenant uses it instead, configure an explicit allow rule before skipping the default check. See [Actor criteria](https://www.ibm.com/docs/en/security-verify?topic=clients-actor-criteria).
+   Step 4 configures the `may_act` relationship using the permanent
+   Agent Registry ID as `may_act.sub`. During Token Exchange, Verify
+   uses this relationship to validate whether the actor is permitted
+   to act on behalf of the signed-in user. 
+   See [Actor criteria](https://www.ibm.com/docs/en/security-verify?topic=clients-actor-criteria).
 
 ## Step 5 — Create the MCP Authorization Details Type
 
@@ -426,14 +432,38 @@ authorization_details = MCP tool invocation context
 
 ### Create the Token Exchange application
 
-1. Open **Applications → Add application → OpenID Connect** and name it `UC2 Course MCP Agent Token Exchange`; complete the company name.
-2. Under **Sign-on configuration**, enable **Token Exchange** and require an actor token.
-3. Set subject and actor token types to `urn:ietf:params:oauth:token-type:access_token`.
-4. Under token settings, select **JWT** for the **delegated output access token**, and set audience to `course-mcp-server`. This output format is distinct from the human subject access-token format.
-5. Permit `mcp.tools.invoke`, `course.read`, and `course.enroll`, and attach the ADT from Step 5.
-6. Leave **Skip default actor validation** disabled for the Step 4 `may_act` configuration.
-7. Open **Endpoint configuration → Token → Consent request → Edit** and paste the UC2 mapping below.
-8. Save the application and record its credentials as `STS_CLIENT_ID` and `STS_CLIENT_SECRET`. These are the configuration keys used by the application for Token Exchange.
+1. Open **Applications → Add application → OpenID Connect**.
+2. Name the application **UC2 Course MCP Agent Token Exchange** and complete the required application details.
+3. Under **Sign-on configuration**, enable **Token Exchange** and require an actor token.
+4. Under **Token Exchange**, configure:
+   - **Subject Token:** Access token
+   - **Actor Token:** Access token
+
+   Both correspond to the OAuth token type `urn:ietf:params:oauth:token-type:access_token`. Select the corresponding UI options rather than entering the URN.
+5. Configure the **output access token format** as **JWT**.
+
+   **Why:** The UC2 MCP server validates the delegated JWT locally, including its signature, issuer, audience, scopes, actor identity, and authorization details. The sample does not use token introspection for this validation. This is separate from the human subject access-token format configured in Step 4.
+6. Configure the **Audience** as `course-mcp-server`.
+
+   **Why:** The MCP server expects the delegated token's `aud` claim to contain `course-mcp-server`. The runtime also sends `audience=course-mcp-server` in the Token Exchange request. For this sample, configure the audience explicitly in the Token Exchange application; the request parameter alone is not sufficient for the demonstrated Verify configuration.
+
+7. Configure the permitted scopes:
+   - `mcp.tools.invoke`
+   - `course.read`
+   - `course.enroll`
+
+   Associate the authorization detail type `urn:ibm:demo:verify:mcp_tool_action` registered in Step 5.
+8. Leave **Skip default actor validation** disabled.
+
+   Step 4 configures the `may_act` relationship using the permanent Agent Registry ID as `may_act.sub`. Verify uses this relationship during Token Exchange to validate the actor's authorization to act on behalf of the user.
+
+   **Actor Criteria** is an alternative. If your tenant uses Actor Criteria, configure an explicit authorization rule before skipping default actor validation.
+
+   See [Actor criteria](https://www.ibm.com/docs/en/security-verify?topic=clients-actor-criteria).
+9. Open **Endpoint configuration → Token → Consent request → Edit**.
+
+   Configure the Token Exchange authorization-details mapping using the rule immediately below these instructions. This mapping determines the scopes granted for each approved MCP operation and carries the approved authorization details into the issued token.
+10. Save the application and record its credentials as `STS_CLIENT_ID` and `STS_CLIENT_SECRET`.
 
 ### Allow users to use the application
 
@@ -445,10 +475,27 @@ This lets the test user use the Token Exchange application. For a restricted dep
 
 ### Associate the application with the agent's OBO task
 
-1. Open **Identities → AI agents → your agent → Edit**.
-2. Open **Agent tasks** and select **Act on behalf of a user**.
-3. Select **UC2 Course MCP Agent Token Exchange** and save.
-4. Reopen the agent and confirm both associations:
+The UC2 Course MCP Conversational Agent uses two OAuth application associations:
+
+Agent identity: The runtime OAuth application authenticates the agent and allows it to obtain an actor access token.
+
+Agent tasks: The Token Exchange application supports the Act on behalf of a user task, allowing the agent to request delegated access for an authenticated user.
+
+To configure the OBO task:
+
+1. Open Identities → AI agents.
+
+2. Select UC2 Course MCP Conversational Agent and click Edit.
+
+3. Click Next to navigate to the Identity & OAuth panel.
+
+4. Under Agent tasks, select Act on behalf of a user as the task purpose.
+
+5. Select UC2 Course MCP Agent Token Exchange as the associated application.
+
+6. Save the changes.
+
+**Reopen the agent and confirm both application associations:**
 
 | Purpose | Application |
 |---|---|
@@ -536,7 +583,14 @@ The application does not request that broad set. The rule above chooses the mini
 
 **If omitted or incorrect:** A missing or wrong `AGENT_ID` fails the local actor check even if Verify issued a valid token.
 
-**Completion check:** `AGENT_ID` contains the ID from the agent details, and all application credentials have been entered.
+**Completion check:** 
+- `AGENT_ID` contains the ID from the agent details, and all application credentials have been entered.
+-	<tenant> should be replaced in all locations with the hostname of your tenant.
+-	SUBJECT_CLIENT_ID and SUBJECT_CLIENT_SECRET should be taken from the application “UC2 Course MCP Subject Application” (proposed name) configured in step 4.
+-	ACTOR_CLIENT_ID and ACTOR_CLIENT_SECRET should be taken from the “UC2 Course MCP Conversational Agent” application configured in step 2.
+-	STS_CLIENT_ID and STS_CLIENT_SECRET should be taken from the “UC2 Course MCP Agent Token Exchange” application configured in step 6
+- VERIFY_MANAGEMENT_CLIENT_ID and VERIFY_MANAGEMENT_CLIENT_SECRET.
+
 
 For a fresh local configuration:
 
